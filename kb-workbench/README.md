@@ -1,0 +1,78 @@
+# Atlas 知识库工作台
+
+服务实时读取本机 Obsidian 主库的 `notes/` 和 `resources/`，不上传笔记到服务器。所有笔记、搜索、附件和工作台页面都需要登录。首次进入登录页可创建唯一管理员，必须输入本机生成的初始化凭据，密码至少 12 位。
+
+## 本机运行
+
+```sh
+npm start
+```
+
+打开 `http://127.0.0.1:4317/login`。初始化凭据在 `.local/setup-token`，仅在本机读取并填写，不要发到聊天中。创建管理员后该凭据自动删除；`.local/admin.json` 只保存密码哈希，须备份此文件并保持私有。会话有效期 12 小时，服务重启后需重新登录。忘记密码时需在本机停止服务，备份并移走 `admin.json`，重启后重新初始化。
+
+也可双击 `start.command`：脚本检查服务就绪后，根据 `/auth/status` 返回的运行配置打开本机或公网地址。已有服务不会被脚本关闭；本次由脚本启动的服务随脚本退出而停止。
+
+环境变量：`PORT`（默认 4317）、`ATLAS_VAULT`（默认本机主库路径）、`ATLAS_STATE_DIR`（默认项目 `.local`）、`ATLAS_PUBLIC_URL`（公网时必须设为 `https://note.lrwei91.com`）。不公开 `.local`，不将 `public/` 直接挂到静态托管。
+
+## Cloudflare 部署（当前使用）
+
+公网地址：`https://note.lrwei91.online`。
+
+```text
+浏览器 → Cloudflare HTTPS → 加密 Tunnel → 本机 127.0.0.1:4317 → Obsidian 主库
+```
+
+不需要云服务器或本机入站端口。笔记保持在本机；访问内容经过 Cloudflare 转发，浏览器收到的内容来自本机当前文件。Mac 必须开机、联网、保持用户会话且不休眠。休眠、掉线或注销时网站不可用。
+
+Atlas 使用独立隧道 `atlas-note`，ID 为 `3d69a56c-1b8d-4c8b-b53e-bd6acdd83567`。隧道配置位于 `.local/cloudflared.yml`，私密凭据位于 `.local/cloudflared-credentials.json`。不要公开凭据或 `.local/`。域名 `note.lrwei91.online` 的 Cloudflare 代理 CNAME 指向此隧道。
+
+服务与隧道分别由用户 LaunchAgent 管理：`com.lrwei91.atlas`、`com.lrwei91.atlas-cloudflare`。用户登录时启动，异常退出自动重启；不负责系统登录前的运行，也不会自动禁用休眠。管理员账号保留，重启后原有会话失效，需重新登录。
+
+安装或更新本机服务：
+
+```sh
+python3 deploy/install-local.py --public-url https://note.lrwei91.online
+python3 deploy/install-cloudflare.py
+```
+
+前提是本机已安装 cloudflared，隧道配置与凭据已就绪。日志在 `.local/server.log`、`.local/server-error.log`、`.local/cloudflared-error.log`。就绪检查为 `http://127.0.0.1:24317/ready`，返回 200 表示隧道连接已建立。
+
+DNS 绑定命令务必使用 Atlas 自身的 `--config` 和明确的隧道 UUID；cloudflared 的默认配置可能属于本机其他服务。不要修改其他域名或隧道。
+
+公网环境必须配置 `ATLAS_PUBLIC_URL=https://note.lrwei91.online`，使登录请求校验正确来源，Cookie 使用 Secure、HttpOnly 和 SameSite=Strict；HTTP 请求会跳转到 HTTPS。公网域名启用后请从域名登录，本机 HTTP 登录不作为公网登录入口。
+
+先前准备的 `deploy/Caddyfile` 与 `deploy/install-tunnel.py` 为备用云服务器方案，当前没有启用。
+
+## 验证
+
+```sh
+npm test
+```
+
+使用临时笔记库和临时账号验证首次初始化、登录、退出、会话保护、限速、路径穿越、符号链接隔离、附件下载、实时读取和原页面渲染，不修改真实主库或管理员。
+
+`npm test` 同时包含 UTF-8 分块传输、编辑版本冲突、分类名转义、导航竞态、未保存草稿保护、特殊文件名、附件入口、移动导航以及真实筛选与排序断言；临时库中会执行在线编辑、保存与删除回归。
+
+公网验收还需验证有效 HTTPS 证书、未登录拒绝 API/附件、管理员登录后的笔记与附件访问、本机数据更新、隧道断线重连。仅本地测试通过不能说明域名部署完成。
+
+性能与实时更新回归可运行 `npm run test:performance`。测试使用临时库（502 篇笔记、500 张图片），输出预热后 9 次本地 HTTP 请求的中位耗时，并检查外部编辑、原子替换、新增、改名、删除、在线保存及图片解析的实时变化。测试不访问真实主库或公网。
+
+笔记内容与小写搜索文本使用内存缓存，保留文本上限为 32 MiB；每次请求仍检查文件元数据，变更文件重新读取。文档图片优先直接解析路径，仅需要全库唯一文件名匹配时扫描附件；侧栏目录和日期计数在卡片加载后一次汇总。
+
+参考：[Cloudflare Tunnel 官方部署文档](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)。
+
+## 在线编辑与安全删除
+
+Markdown 文档支持在线编辑：阅读页点击「编辑」修改原文，保存即原子写入本机主库对应文件（先写临时文件再替换，避免写坏），Obsidian 与 iCloud 会自然看到变化，无需额外同步。点击「删除」需二次确认，文档不会真删，而是移入主库 `.trash/` 目录并保留目录结构，可随时手动找回；同名文件自动加时间戳避免覆盖，关联的分享链接同时失效。写入与删除接口仅接受登录会话且校验请求来源。
+
+保存使用读取时的文档版本：`GET /api/doc` 返回 `version`，`PUT /api/doc` 需同时提交 `content` 和该版本。缺少有效版本返回 428；外部或其他窗口已经修改文档时返回 409，保留浏览器草稿，需复制草稿并重新打开文档合并修改。失败保存不会解除未保存提示，页面内导航和取消编辑也会检查草稿；保存进行中暂停离开编辑页。
+
+PDF 等非 Markdown 卡片提供受登录保护的打开和下载入口。窄屏可通过顶栏「浏览」展开分类和日历导航。
+
+## 文档分享与图片、视频
+
+打开文档后点击「分享文档」，生成并复制免登录链接。持有链接的访客可查看此文档的当前内容及其引用的本地图片、视频及封面图；其他笔记、目录、搜索和未引用的附件仍需登录。编辑本机文档会更新分享内容。点击「取消分享」可使原链接失效，再分享会生成新链接。分享记录保存在私有 `.local/shares.json`，服务重启后仍有效。已被访客保存的内容无法撤回。
+
+阅读页和分享页使用同一渲染器：隐藏文档头部 YAML 元数据；兼容 Obsidian `![[图片.png|300]]` / `300x200`、Markdown 和 HTML 图片、相对路径、中文及空格文件名。优先使用文档相对路径，其次查找主库资源目录；仅当文件名唯一时使用全库匹配，避免选错同名图片。图片缺失时显示「图片未找到」，不修改原始笔记。
+
+图片与视频都可在阅读页和分享页内显示。视频支持 Obsidian `![[演示.mp4|640]]`、Markdown `![](演示.mp4)`、HTML `<video src="演示.mp4">` 与嵌套 `<source>`，并支持本地封面 `poster`。播放器显示控制栏，不自动播放，按需加载元数据；本地视频通过 HTTP Range 支持分段加载和进度拖动。可识别 MP4、WebM、OGV、MOV、M4V，实际解码能力取决于浏览器与视频编码。不会嵌入第三方网站 iframe。

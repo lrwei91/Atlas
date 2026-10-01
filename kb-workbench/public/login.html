@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · Atlas</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f4f0;color:#252722;font:15px system-ui;min-height:100vh;display:grid;place-items:center;padding:24px}main{width:100%;max-width:400px;padding:36px;background:white;border:1px solid #e2e3dc;border-radius:16px}h1{margin:0 0 8px}p{color:#6d7169;line-height:1.6}label{display:block;margin:18px 0 6px}input,button{width:100%;font:inherit;padding:12px;border-radius:8px;border:1px solid #d6d9d1}button{margin-top:24px;background:#354b3d;color:white;cursor:pointer}button:disabled{opacity:.5}#error{color:#a33232;min-height:24px}#setup{display:none}a{color:#354b3d}
+</style></head><body><main><h1>Atlas</h1><p id="hint">登录后查看你的知识库。</p><form id="form">
+<label for="username">账号</label><input id="username" name="username" autocomplete="username" required maxlength="64">
+<label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+<div id="setup"><label for="setupToken">初始化凭据</label><input id="setupToken" type="password" autocomplete="off" maxlength="64"><label for="confirm">确认密码</label><input id="confirm" type="password" autocomplete="new-password" maxlength="256"></div>
+<button id="submit" disabled>登录</button><p id="error" role="alert"></p></form></main><script>
+let setupRequired=false;const $=id=>document.getElementById(id);
+fetch('/auth/status').then(r=>r.json()).then(s=>{if(s.authenticated){location.replace('/');return}setupRequired=s.setupRequired;if(setupRequired){$('hint').textContent='首次使用：创建管理员账号，密码至少 12 位。';$('setup').style.display='block';$('password').minLength=12;$('password').autocomplete='new-password';$('setupToken').required=true;$('confirm').required=true;$('submit').textContent='创建管理员';} $('submit').disabled=false}).catch(()=>{$('error').textContent='无法连接服务，请稍后重试。'});
+$('form').addEventListener('submit',async e=>{e.preventDefault();$('error').textContent='';if(setupRequired&&$('password').value!==$('confirm').value){$('error').textContent='两次输入的密码不一致';return}$('submit').disabled=true;try{const r=await fetch(setupRequired?'/auth/setup':'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value,setupToken:$('setupToken').value})});const result=await r.json();if(!r.ok)throw new Error(result.error);location.replace('/');}catch(error){$('error').textContent=error.message;$('submit').disabled=false}});
+</script></body></html>
