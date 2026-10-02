@@ -84,6 +84,7 @@ async function serverTests() {
     const coverCard = name => coverCards.find(card => card.relPath === name);
     assert.equal(coverCard('cover.md').cover, inlineCover);
     assert.equal(coverCard('cover.md').excerpt, '这是应当显示的正文摘要。');
+    assert.equal(coverCard('cover.md').chars, require('./public/reader').body(coverNotes['cover.md']).length);
     assert.equal(coverCard('cover-crlf.md').cover, inlineCover);
     assert.equal(coverCard('cover-body.md').cover, '/files/resources/body.png');
     assert.equal(coverCard('cover-unsafe.md').cover, '/files/resources/body.png');
@@ -264,4 +265,79 @@ async function frontendTests() {
   } finally { dom.window.close(); }
 }
 
-(async () => { await serverTests(); await frontendTests(); })().catch(error => { console.error(error); process.exitCode = 1; });
+async function mobileFrontendTests() {
+  const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
+  const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window, errors = [], mediaListeners = [];
+  const media = { matches: true, addEventListener: (_, fn) => mediaListeners.push(fn) };
+  w.matchMedia = () => media;
+  w.confirm = () => false;
+  w.HTMLElement.prototype.scrollTo = function() { this.scrollTop = 0; };
+  const cards = [{ relPath: 'Work/A.md', title: 'A', isMarkdown: true, dir: 'Work', excerpt: 'Original body', chars: 50, mtime: Date.now() },
+    { relPath: 'file.pdf', title: 'file.pdf', isMarkdown: false, dir: '', excerpt: '', size: 12, mtime: Date.now() }];
+  const calls = [];
+  w.addEventListener('error', e => { errors.push(e.message); e.preventDefault(); });
+  w.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    let body;
+    if (url === '/api/cards') body = { cards };
+    else if (url === '/api/tree') body = { children: [{ name: 'Work', relPath: 'Work', children: [] }] };
+    else if (url === '/auth/status') body = { authenticated: true };
+    else if (url.startsWith('/api/search')) body = { results: [] };
+    else if (url.startsWith('/api/share')) body = { url: null };
+    else if (url.includes('file.pdf')) body = { isMarkdown: false, size: 12, mtime: Date.now() };
+    else body = { relPath: 'Work/A.md', isMarkdown: true, content: '# A\nOriginal body', assets: {}, version: 'a'.repeat(64) };
+    return { status: 200, ok: true, json: async () => body };
+  };
+  const $ = selector => w.document.querySelector(selector);
+  try {
+    for (const file of ['vendor/marked.min.js', 'reader.js']) w.eval(fs.readFileSync(path.join(__dirname, 'public', file), 'utf8'));
+    w.eval(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+    await waitFor(() => $('#m-scroll .card'));
+    $('#btn-nav').click(); assert.equal($('#m-mask').classList.contains('on'), true);
+    $('#btn-nav-close').click(); assert.equal($('#m-mask').classList.contains('on'), false);
+    w.setRoute('dir', 'Work'); await pause(20);
+    $('#m-scroll .card').click(); await waitFor(() => $('#m-reader-body .article'));
+    $('#btn-m-back').click(); await waitFor(() => w.parseHash().view === 'dir');
+    assert.equal(w.parseHash().param, 'Work');
+    $('#m-scroll .card').click(); await pause(20); await waitFor(() => $('#m-reader-shell').classList.contains('on'));
+    await waitFor(() => !$('#btn-m-more').disabled);
+    $('#btn-m-more').click(); $('#m-rm-del').click();
+    assert.equal($('#m-rmenu').classList.contains('on'), true);
+    assert.equal($('#m-rm-del').classList.contains('armed'), true);
+    $('#btn-m-back').click(); await pause(20);
+    assert.equal($('#m-rm-del').classList.contains('armed'), false);
+    assert.equal(calls.some(call => call.options.method === 'DELETE'), false);
+    $('#m-scroll .card').click(); await pause(20); await waitFor(() => !$('#btn-m-more').disabled);
+    $('#btn-m-more').click(); $('#m-rm-edit').click();
+    const editor = $('#editor-m'); assert.ok(editor);
+    editor.value += '\nUnsaved draft';
+    media.matches = false; mediaListeners.forEach(fn => fn());
+    assert.equal($('#main #editor-m'), editor); assert.match(editor.value, /Unsaved draft/);
+    media.matches = true; mediaListeners.forEach(fn => fn());
+    assert.equal($('#m-reader-body #editor-m'), editor); assert.match(editor.value, /Unsaved draft/);
+    $('#btn-m-back').click(); assert.equal($('#m-reader-shell').classList.contains('on'), true);
+    assert.equal($('#editor-m'), editor); assert.equal(w.parseHash().view, 'doc');
+    editor.value = '# A\nOriginal body'; $('#btn-cancel-m').click();
+    await waitFor(() => $('#m-reader-body .article'));
+    $('#btn-m-back').click(); await pause(20);
+    w.setRoute('doc', 'file.pdf'); await waitFor(() => $('#m-reader-body a[download]'));
+    assert.equal($('#btn-m-more').disabled, true); assert.equal($('#btn-m-share').disabled, true);
+    $('#btn-m-back').click(); await pause(20);
+    media.matches = false; mediaListeners.forEach(fn => fn());
+    assert.equal($('#m-root').hasAttribute('hidden-m'), true);
+    assert.equal($('.m-drawer-brand').hasAttribute('hidden-m'), true);
+    media.matches = true; mediaListeners.forEach(fn => fn());
+    assert.equal($('#m-root').hasAttribute('hidden-m'), false);
+    assert.ok($('#m-scroll .card'));
+    w.setRoute('search', '不存在的笔记'); await pause(20);
+    assert.equal($('#m-title').textContent, '搜索');
+    assert.match($('#m-sub').textContent, /0 篇命中/);
+    assert.equal($('#m-chips').style.display, 'none');
+    assert.match($('#m-scroll').textContent, /没有找到/);
+    assert.deepEqual(errors, []);
+    console.log('PASS: mobile drawer, reader return/reopen, delete disarm, dirty back guard, PDF actions, breakpoint roundtrip');
+  } finally { dom.window.close(); }
+}
+
+(async () => { await serverTests(); await frontendTests(); await mobileFrontendTests(); })().catch(error => { console.error(error); process.exitCode = 1; });

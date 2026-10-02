@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Atlas · 知识库工作台</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%23FFD84D'/><rect x='20' y='26' width='60' height='9' rx='4.5' fill='%23171715'/><rect x='20' y='46' width='44' height='9' rx='4.5' fill='%23171715'/><rect x='20' y='66' width='52' height='9' rx='4.5' fill='%23171715'/></svg>">
 <script src="/vendor/marked.min.js"></script>
@@ -322,6 +322,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 }
 
 .mobile-nav { display: none; }
+#btn-nav-search { display: none; }
 .searchbox { min-width: 0; }
 /* 移动端专属节点：桌面端一律隐藏，JS 检测到窄屏后移除该属性再启用 */
 [hidden-m] { display: none !important; }
@@ -352,11 +353,11 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
    顶栏双按钮 + 双列瀑布流 + 底部 tab bar + 抽屉分类 + 独立「我的」页
    状态栏由系统绘制，此处只用 env(safe-area-inset-*) 让出安全区 */
 @media (max-width: 767px) {
-  body { background: var(--canvas); }
+  body { background: var(--canvas); overflow: hidden; }
 
   /* ---- 顶栏：仅左右两个圆形按钮，品牌标识在侧栏 ---- */
   header {
-    height: 46px; padding: 0 10px; gap: 6px;
+    height: 46px; padding: 0 8px; gap: 6px;
     padding-top: env(safe-area-inset-top);
     height: calc(46px + env(safe-area-inset-top));
     background: var(--canvas);
@@ -364,7 +365,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .brand { display: none; }
   .searchbox { display: none; }
   #btn-nav, #btn-nav-search {
-    width: 34px; height: 34px; flex-shrink: 0; border-radius: 999px;
+    width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-secondary); cursor: pointer; padding: 0;
@@ -383,7 +384,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.3' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20.5 20.5 16 16'/%3E%3C/svg%3E") center/contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.3' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20.5 20.5 16 16'/%3E%3C/svg%3E") center/contain no-repeat;
   }
-  .header-right { gap: 6px; }
+  .header-right { display: none; }
   .header-right .stat { display: none; }
   #btn-random, #btn-logout { display: none; }
   #progress { top: calc(46px + env(safe-area-inset-top)); }
@@ -400,14 +401,15 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   /* 滚动交给外层容器，.grid 只负责分列 */
   .m-scroll {
     flex: 1 1 0; height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    padding: 0 6px calc(78px + env(safe-area-inset-bottom));
+    min-height: 0; overscroll-behavior-y: contain;
+    padding: 0 8px 16px;
   }
   .m-scroll > .grid { padding: 0; }
 
   /* ---- chip 筛选行（横向滚动，右侧渐隐） ---- */
   .m-chips {
     display: flex; align-items: center; gap: 6px;
-    padding: 2px 12px 10px; overflow-x: auto; scrollbar-width: none;
+    flex-shrink: 0; padding: 6px 12px 10px; overflow-x: auto; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
     mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
     -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
@@ -415,7 +417,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .m-chips::-webkit-scrollbar { display: none; }
   .m-chips[hidden] { display: none; }
   .m-chips .m-chip {
-    flex-shrink: 0; height: 28px; padding: 0 12px; border-radius: 999px;
+    flex-shrink: 0; height: 36px; padding: 0 12px; border-radius: 999px;
     font-size: 12.5px; font-family: var(--font); white-space: nowrap;
     color: var(--text-secondary); background: var(--surface-subtle);
     border: 1px solid var(--border); cursor: pointer;
@@ -428,19 +430,19 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 
   /* ---- 视图标题行 ---- */
   .m-viewhead {
-    display: flex; align-items: baseline; gap: 8px;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; flex-shrink: 0; min-width: 0;
     padding: 2px 14px 10px;
   }
-  .m-viewhead b { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; }
-  .m-viewhead span { font-family: var(--mono); font-size: 11px; color: var(--text-subtle); }
+  .m-viewhead b { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; }
+  .m-viewhead span { font-family: var(--mono); font-size: 11px; color: var(--text-subtle); min-width: 0; overflow-wrap: anywhere; }
 
   /* ---- 双列瀑布流：卡片媒体区高度刻意不等高，维持错落 ---- */
   .grid {
-    display: block; column-count: 2; column-gap: 6px;
+    display: block; column-count: 2; column-gap: 8px;
   }
   .grid .card {
     break-inside: avoid; -webkit-column-break-inside: avoid;
-    margin: 0 0 6px; padding: 0; overflow: hidden; gap: 0;
+    margin: 0 0 8px; padding: 0; overflow: hidden; gap: 0; min-width: 0;
     background: var(--surface); border-radius: var(--radius-card);
   }
   .grid .card .c-media {
@@ -466,14 +468,14 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     background: rgba(0,0,0,.42); padding: 2px 6px; border-radius: 6px;
   }
   .grid .card .c-text { padding: 8px 9px 9px; }
-  .grid .card .c-text .c-title { font-size: 13.5px; line-height: 1.38; margin: 0; }
+  .grid .card .c-text .c-title { font-size: 13.5px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
   .grid .card .c-foot {
     margin: 6px 0 0; padding-top: 0; border-top: none;
     display: flex; align-items: center; gap: 5px;
     font-size: 11.5px; color: var(--text-subtle);
   }
   .grid .card .c-foot .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
-  .grid .card .c-foot .cat { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grid .card .c-foot .cat { flex: 1; min-width: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .grid .card .c-foot .date { margin-left: auto; flex-shrink: 0; font-family: var(--mono); font-size: 10.5px; }
   /* 移动端 hover 无意义，取消抬升 */
   .grid .card:hover { transform: none; box-shadow: none; }
@@ -492,7 +494,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     background: var(--canvas); border-top: 1px solid var(--border);
   }
   .m-tabbar .m-item {
-    flex: 1; height: 100%; display: flex; flex-direction: column;
+    flex: 1; min-width: 0; height: 54px; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 3px;
     font-size: 10px; color: var(--text-subtle); background: none;
     border: none; font-family: var(--font); cursor: pointer; position: relative;
@@ -502,8 +504,8 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .m-tabbar .m-item.fab-item { }
   .m-tabbar .m-item .fab {
     position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: calc(15px + env(safe-area-inset-bottom));
-    width: 44px; height: 29px; border-radius: 13px 13px 0 0;
+    top: 3px;
+    width: 44px; height: 29px; border-radius: 10px;
     background: var(--accent); display: flex; align-items: center; justify-content: center;
   }
   .m-tabbar .m-item.fab-item .m-label { margin-top: 32px; }
@@ -511,15 +513,22 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   /* ---- 抽屉（分类） ---- */
   aside {
     display: none; z-index: 130; width: min(320px, 86vw);
+    top: 0; bottom: 0; height: 100dvh;
     background: var(--canvas); box-shadow: 8px 0 30px rgba(0,0,0,.14);
     padding-top: calc(12px + env(safe-area-inset-top));
   }
   aside.is-open { display: flex; }
-  .m-drawer-brand { padding: 8px 20px 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px; display: block; }
+  #btn-nav-close { display: inline-flex; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 14px; width: 44px; height: 44px; padding: 0; font-size: 0; border-radius: 50%; align-items: center; justify-content: center; }
+  #btn-nav-close::after { content: '×'; font-size: 24px; line-height: 1; }
+  .m-drawer-brand { flex-shrink: 0; padding: 8px 54px 14px 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; display: block; }
   .m-drawer-brand b { display: block; font-size: 22px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.2; }
   .m-drawer-brand span { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle); margin-top: 4px; }
   #nav-tree { padding-bottom: 8px; }
-  #calendar { padding: 10px 14px 14px; }
+  #calendar { padding: 10px 6px calc(14px + env(safe-area-inset-bottom)); }
+  aside .nav-item { min-height: 44px; }
+  aside .nav-sub .nav-item { min-height: 40px; }
+  aside .cal-nav { width: 32px; height: 32px; }
+  aside .cal-day { height: 32px; }
 
   /* ---- 遮罩 ---- */
   .m-mask {
@@ -536,12 +545,12 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   }
   .m-searchpane.on { display: block; }
   .m-searchpane .box {
-    display: flex; align-items: center; gap: 8px; height: 38px;
+    display: flex; align-items: center; gap: 8px; min-height: 44px;
     padding: 0 12px; border-radius: var(--radius-control);
     background: var(--surface); border: 1px solid var(--border);
   }
-  .m-searchpane input { flex: 1; min-width: 0; border: none; outline: none; background: none; color: var(--text-primary); font-size: 14px; font-family: var(--font); }
-  .m-searchpane button { font-size: 13px; color: var(--text-secondary); background: none; border: none; cursor: pointer; font-family: var(--font); }
+  .m-searchpane input { flex: 1; min-width: 0; border: none; outline: none; background: none; color: var(--text-primary); font-size: 16px; font-family: var(--font); }
+  .m-searchpane button { min-height: 44px; flex-shrink: 0; font-size: 13px; color: var(--text-secondary); background: none; border: none; cursor: pointer; font-family: var(--font); }
 
   /* ---- 我的（独立页）---- */
   .m-mepage {
@@ -555,13 +564,13 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     border-bottom: 1px solid var(--border);
   }
   .m-mepage .m-mbar .m-icon {
-    width: 34px; height: 34px; flex-shrink: 0; border-radius: 999px;
+    width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-primary); cursor: pointer; font-size: 15px; line-height: 1;
   }
   .m-mepage .m-mbar .t { flex: 1; min-width: 0; text-align: center; font-size: 15.5px; font-weight: 700; }
-  .m-mepage .m-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .m-mepage .m-body, .m-reader-shell .m-body { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .m-mepage .m-grp { font-family: var(--mono); font-size: 10px; color: var(--text-subtle); letter-spacing: .2em; padding: 16px 16px 8px; }
   .m-mepage .m-profile { display: flex; align-items: center; gap: 12px; padding: 8px 16px 16px; }
   .m-mepage .m-profile .av { width: 48px; height: 48px; border-radius: 15px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 750; font-size: 17px; flex-shrink: 0; }
@@ -593,7 +602,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     padding: env(safe-area-inset-top) 8px 0; display: flex; align-items: center; gap: 4px;
   }
   .m-reader-shell .m-rbar .m-icon {
-    width: 34px; height: 34px; flex-shrink: 0; border-radius: 999px;
+    width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-primary); cursor: pointer; font-size: 15px; line-height: 1;
@@ -607,6 +616,8 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     display: none;
   }
   .m-rmenu.on { display: block; }
+  .m-rmenu { max-height: calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; }
+  .m-rmenu button[hidden] { display: none; }
   .m-rmenu button {
     width: 100%; display: flex; align-items: center; gap: 10px;
     padding: 11px 12px; border-radius: 9px; font-size: 13.5px;
@@ -614,6 +625,10 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     text-align: left; font-family: var(--font); cursor: pointer;
   }
   .m-rmenu button.danger { color: #D6403A; }
+  /* 删除确认态：反色强调 + 轻微呼吸提示还有 4 秒 */
+  .m-rmenu button.danger.armed { background: #D6403A; color: #fff; font-weight: 700; animation: armedPulse 1s var(--ease-editorial) infinite; }
+  .m-rmenu.destructive { box-shadow: 0 0 0 2px #D6403A, 0 12px 32px rgba(0,0,0,.2); }
+  @keyframes armedPulse { 0%,100% { opacity: 1; } 50% { opacity: .82; } }
 
   /* ---- 返回顶部 ---- */
   .m-totop {
@@ -631,11 +646,37 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .m-reader-shell .m-totop { bottom: calc(20px + env(safe-area-inset-bottom)); }
 
   /* ---- 阅读正文：移动端排版 ---- */
-  .m-reader-shell .article { border: none; border-radius: 0; padding: 6px 16px calc(28px + env(safe-area-inset-bottom)); background: none; }
+  .m-reader-shell .article { border: none; border-radius: 0; padding: 6px 16px 28px; background: none; overflow-wrap: anywhere; }
   .m-reader-shell .article h1 { font-size: 22px; }
   .m-reader-shell .article p { font-size: 15px; line-height: 1.85; }
   .m-reader-shell .reader-meta { padding: 0 16px; }
+  .m-reader-shell .reader-meta .r-path { min-width: 0; overflow-wrap: anywhere; }
   .m-reader-shell .reader-back { margin-left: -6px; }
+
+  /* ---- 移动端编辑态：工具栏竖排 + 全屏文本域 ---- */
+  #m-reader-body .m-editor-bar {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    margin: 0 0 10px; padding: 10px 16px;
+    background: var(--canvas); border-bottom: 1px solid var(--border);
+  }
+  #m-reader-body .m-editor-bar .e-label { display: block; font-size: 11px; color: var(--text-subtle); font-family: var(--mono); }
+  #m-reader-body .m-editor-bar .e-status { font-size: 12.5px; color: var(--text-subtle); min-height: 16px; display: block; }
+  #m-reader-body .m-editor-bar .e-status:empty { display: none; }
+  #m-reader-body.is-editing .reader-meta { display: none; }
+  #m-reader-body .m-editor-bar .e-actions { display: flex; align-items: stretch; gap: 8px; margin-left: 0; margin-top: 2px; }
+  #m-reader-body .m-editor-bar .btn-ghost {
+    flex: 1 1 0; min-width: 0; height: 42px; padding: 0 12px;
+    white-space: nowrap; font-size: 14.5px; font-weight: 600;
+  }
+  #m-reader-body #btn-save-m { background: var(--text-primary); color: var(--canvas); border-color: var(--text-primary); font-weight: 700; }
+  #m-reader-body .m-editor {
+    display: block; width: calc(100% - 32px); margin: 0 16px; min-height: max(240px, calc(100dvh - 240px));
+    padding: 14px; resize: vertical; outline: none;
+    font-family: var(--mono); font-size: 16px; line-height: 1.75; color: var(--text-primary);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control);
+  }
+  #m-reader-body .m-editor:focus { border-color: var(--focus); }
 
   /* ---- 空态 ---- */
   .m-scroll .empty { padding: 60px 24px; }
@@ -644,6 +685,10 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   * { scrollbar-width: none; }
   ::-webkit-scrollbar { width: 0; height: 0; display: none; }
 }
+@media (max-width: 767px) and (max-height: 600px) {
+  aside { overflow-y: auto; }
+  aside #nav-tree { flex: none; overflow: visible; }
+}
 </style>
 </head>
 <body>
@@ -651,7 +696,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 <div id="progress"></div>
 
 <header>
-  <button id="btn-nav" class="btn-ghost mobile-nav" aria-controls="sidebar" aria-expanded="false" title="分类">浏览</button>
+  <button id="btn-nav" class="btn-ghost mobile-nav" aria-controls="sidebar" aria-expanded="false" aria-label="分类" title="分类">浏览</button>
   <div class="brand"><b>Atlas</b><span>KNOWLEDGE WORKBENCH</span></div>
   <div class="searchbox">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -712,7 +757,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 <!-- 移动端：搜索面板 -->
 <div class="m-searchpane" id="m-searchpane" hidden-m>
   <div class="box">
-    <input id="m-search-input" type="text" placeholder="全文检索标题与正文…" autocomplete="off">
+    <input id="m-search-input" type="search" aria-label="搜索笔记" enterkeyhint="search" placeholder="全文检索标题与正文…" autocomplete="off">
     <button id="m-search-cancel">取消</button>
   </div>
 </div>
@@ -722,7 +767,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   <div class="m-mbar">
     <button class="m-icon" id="btn-me-back" aria-label="返回">‹</button>
     <span class="t">我的</span>
-    <span style="width:34px;flex-shrink:0"></span>
+    <span style="width:44px;flex-shrink:0"></span>
   </div>
   <div class="m-body" id="m-me-body"></div>
 </section>
@@ -742,8 +787,8 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 <div class="m-rmenu" id="m-rmenu" hidden-m>
   <button id="m-rm-edit">编辑原文</button>
   <button id="m-rm-copy">复制分享链接</button>
-  <button id="m-rm-revoke" hidden-m>取消分享</button>
-  <button id="m-rm-del" style="color:#D6403A">删除文档</button>
+  <button id="m-rm-revoke" hidden>取消分享</button>
+  <button id="m-rm-del" class="danger">删除文档</button>
 </div>
 
 <div class="m-mask" id="m-mask" hidden-m></div>
@@ -769,6 +814,7 @@ let countByDay = new Map();
 let pendingDocHeading = null;
 let nameIndex = {};   // 文件名(不含扩展) -> relPath
 let route = { view: 'all', param: '' };
+let mobileReturnRoute = { view: 'all', param: '' };
 let filters = { period: 'all', sort: 'new' };   // 时间段筛选 + 排序
 let baseList = [];       // 当前视图基础卡片集（未应用筛选项）
 let viewTitle = '', viewSub = '';
@@ -786,13 +832,28 @@ const hasMq = typeof window.matchMedia === 'function';
 const mq = hasMq ? window.matchMedia(`(max-width: ${MOBILE_MAX}px)`) : null;
 const isMobile = () => !!mq && mq.matches;
 // 桌面端保持隐藏，移动端移除标记
+const mobileNodes = [...document.querySelectorAll('[hidden-m]')];
 function syncMobileFlags() {
-  document.querySelectorAll('[hidden-m]').forEach(el => {
+  mobileNodes.forEach(el => {
     if (isMobile()) el.removeAttribute('hidden-m'); else el.setAttribute('hidden-m', '');
   });
 }
 syncMobileFlags();
-if (hasMq) mq.addEventListener('change', () => { syncMobileFlags(); renderView(); });
+if (hasMq) mq.addEventListener('change', () => {
+  syncMobileFlags();
+  if (!editState) { renderView(); return; }
+  // 断点切换时移动现有编辑节点，保留草稿、光标和正在进行的保存。
+  const mobile = isMobile();
+  const host = mobile ? $('#m-reader-body') : main;
+  const editor = editState.editor;
+  const bar = editor.previousElementSibling;
+  bar.classList.toggle('m-editor-bar', mobile);
+  editor.classList.toggle('m-editor', mobile);
+  host.replaceChildren(bar, editor);
+  $('#m-reader-body').classList.toggle('is-editing', mobile);
+  $('#m-reader-shell').classList.toggle('on', mobile);
+  renderSidebar();
+});
 
 /* 移动端渲染目标容器：窄屏走 #m-scroll，桌面沿用 #main */
 const renderTarget = () => (isMobile() ? $('#m-scroll') : main);
@@ -1233,11 +1294,23 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
 
 /* ============ 移动端阅读页 ============ */
 function mCloseReader() {
-  closeRmenu();
+  if (!canLeaveEditor()) return;
+  clearEditor();
+  forceCloseRmenu();
   $('#m-reader-shell').classList.remove('on');
   $('#m-totop-reader').classList.remove('on');
+  if (parseHash().view === 'doc') setRoute(mobileReturnRoute.view, mobileReturnRoute.param);
 }
-function closeRmenu() { $('#m-rmenu').classList.remove('on'); }
+function closeRmenu() {
+  forceCloseRmenu();
+}
+function forceCloseRmenu() {
+  clearTimeout(mDeleteTimer);
+  const menu = $('#m-rmenu');
+  menu.classList.remove('on', 'destructive');
+  mDeleteArmed = false;
+  if (mDeleteBtn) { mDeleteBtn.textContent = '删除文档'; mDeleteBtn.classList.remove('armed'); }
+}
 function toast(msg) {
   let el = $('#m-toast');
   if (!el) {
@@ -1256,7 +1329,12 @@ function toast(msg) {
 async function renderMobileDoc(relPath, epoch) {
   const shell = $('#m-reader-shell');
   const body = $('#m-reader-body');
+  body.classList.remove('is-editing');
+  forceCloseRmenu();
+  mEditAction = mDeleteAction = mShareAction = mRevokeAction = mCopyAction = null;
+  $('#btn-m-share').disabled = $('#btn-m-more').disabled = true;
   shell.classList.add('on');
+  body.scrollTop = 0;
   body.innerHTML = emptyState('正在加载…');
   const r = await fetch('/api/doc?path=' + encodeURIComponent(relPath));
   if (!isCurrentView(epoch) || !isMobile()) return;
@@ -1276,8 +1354,15 @@ async function renderMobileDoc(relPath, epoch) {
       </div>`;
     document.title = title + ' · Atlas';
     bindMobileDocLinks(body);
+    // 非 Markdown 只提供打开/下载，编辑与删除不适用
+    $('#m-rm-edit').hidden = true;
+    $('#m-rm-del').hidden = true;
+    mEditAction = mDeleteAction = mShareAction = mRevokeAction = mCopyAction = null;
     return;
   }
+  $('#m-rm-edit').hidden = false;
+  $('#m-rm-del').hidden = false;
+  $('#btn-m-share').disabled = $('#btn-m-more').disabled = false;
 
   const html = AtlasReader.render(doc, { names: nameIndex, assetUrl: fileUrl });
   body.innerHTML = `
@@ -1293,12 +1378,16 @@ async function renderMobileDoc(relPath, epoch) {
   document.title = title + ' · Atlas';
   $('#m-rm-revoke').hidden = !card.isShared;
   bindMobileDocLinks(body);
+  if (pendingDocHeading?.path === relPath) {
+    AtlasReader.scrollToHeading(body, pendingDocHeading.heading);
+    pendingDocHeading = null;
+  }
   pushRecent(card);
 
   // 分享：与桌面端同一接口，状态回写卡片
   const shareEndpoint = '/api/share?path=' + encodeURIComponent(relPath);
   let shareUrl = null;
-  const mounted = () => isCurrentView(epoch) && $('#m-reader-shell').isConnected;
+  const mounted = () => isCurrentView(epoch) && isMobile() && shell.classList.contains('on');
   const showShare = url => {
     if (!mounted()) return;
     shareUrl = url;
@@ -1352,15 +1441,14 @@ async function renderMobileDoc(relPath, epoch) {
     closeRmenu();
     enterEditMode(relPath, doc, {
       host: body, ns: 'm', mobile: true,
-      relocate: () => renderMobileDoc(relPath, viewEpoch),
+      relocate: () => renderDoc(relPath, viewEpoch),
     });
   };
   // 删除：两段式确认，移入 .trash
   mDeleteAction = async () => {
-    closeRmenu();
     if (mDeleteArmed) {
-      mDeleteArmed = false;
-      mDeleteBtn.textContent = '删除文档';
+      // 二次点击：执行删除
+      forceCloseRmenu();
       if (!canLeaveEditor()) return;
       clearEditor();
       try {
@@ -1368,11 +1456,13 @@ async function renderMobileDoc(relPath, epoch) {
         const result = await resp.json();
         if (!resp.ok) throw Error(result.error || '删除失败');
         await loadCards();
+        renderSidebar();
         if (!mounted()) return;
         mCloseReader();
+        // 回到上级目录视图；该目录已空则回全部笔记
         const dir = relPath.split('/').slice(0, -1).join('/');
-        renderCards(allCards.filter(c => dir ? (c.dir + '/').startsWith(dir + '/') : true), dir || '全部笔记', '');
-        setRoute(dir ? 'dir' : 'all', dir);
+        const stillHas = dir && allCards.some(c => (c.dir + '/').startsWith(dir + '/'));
+        setRoute(stillHas ? 'dir' : 'all', stillHas ? dir : '');
         toast('已移入 .trash，可随时找回');
       } catch (e) { if (mounted()) toast(e.message); }
       return;
@@ -1380,15 +1470,20 @@ async function renderMobileDoc(relPath, epoch) {
     // 第一次点击进入确认态，4 秒内再次点击才执行
     mDeleteArmed = true;
     mDeleteBtn.textContent = '确认删除？';
-    setTimeout(() => {
+    mDeleteBtn.classList.add('armed');
+    $('#m-rmenu').classList.add('destructive');
+    mDeleteTimer = setTimeout(() => {
       if (!mDeleteBtn.isConnected) return;
       mDeleteArmed = false;
       mDeleteBtn.textContent = '删除文档';
+      mDeleteBtn.classList.remove('armed');
+      $('#m-rmenu').classList.remove('destructive');
     }, 4000);
   };
 }
 let mShareAction = null, mEditAction = null, mDeleteAction = null, mRevokeAction = null, mCopyAction = null;
 let mDeleteArmed = false;
+let mDeleteTimer = null;
 const mDeleteBtn = document.getElementById('m-rm-del');
 function bindMobileDocLinks(scope) {
   scope.querySelectorAll('a[href^="#doc="]').forEach(a => {
@@ -1396,7 +1491,7 @@ function bindMobileDocLinks(scope) {
       e.preventDefault();
       const target = parseHash(a.getAttribute('href'));
       const heading = a.dataset.documentHeading;
-      if (target.param === a.dataset.documentPath && heading) { AtlasReader.scrollToHeading(scope, heading); return; }
+      if (target.param === route.param && heading) { AtlasReader.scrollToHeading(scope, heading); return; }
       pendingDocHeading = heading ? { path: target.param, heading } : null;
       setRoute(target.view, target.param);
     });
@@ -1414,11 +1509,22 @@ function enterEditMode(relPath, doc, opts = {}) {
   const relocate = opts.relocate || (() => reloadDoc(relPath));
   const article = host.querySelector('.article');
   if (!article) return;
-  const ns = opts.ns === 'm' ? '-m' : '';   // 桌面沿用原ID（测试与既有选择器依赖），移动端加 -m 后缀
+  // 桌面沿用原ID（regression-test 等既有选择器依赖），移动端加 -m 后缀
+  const ns = opts.ns === 'm' ? '-m' : '';
   const editorId = `editor${ns}`, statusId = `edit-status${ns}`;
-  const saveId = `btn-save${ns}`, cancelId = `btn-cancel${ns}`;
+  const saveId = `btn-save${ns}`, cancelId = opts.ns === 'm' ? 'btn-cancel-m' : 'btn-cancel-edit';
   const barClass = opts.mobile ? 'editor-bar m-editor-bar' : 'editor-bar';
-  article.outerHTML = `
+  article.outerHTML = opts.mobile ? `
+    <div class="${barClass}">
+      <span class="e-label">编辑原文</span>
+      <span id="${statusId}" class="e-status" role="status"></span>
+      <span class="e-actions">
+        <button class="btn-ghost" id="${saveId}">保存</button>
+        <button class="btn-ghost" id="${cancelId}">取消</button>
+      </span>
+    </div>
+    <textarea class="editor m-editor" id="${editorId}" spellcheck="false"></textarea>`
+  : `
     <div class="${barClass}">
       <span class="e-label">MARKDOWN 原文编辑 · 保存即写入本机主库</span>
       <span class="e-actions">
@@ -1427,7 +1533,7 @@ function enterEditMode(relPath, doc, opts = {}) {
         <button class="btn-ghost" id="${cancelId}">取消</button>
       </span>
     </div>
-    <textarea class="editor${opts.mobile ? ' m-editor' : ''}" id="${editorId}" spellcheck="false"></textarea>`;
+    <textarea class="editor" id="${editorId}" spellcheck="false"></textarea>`;
   const editor = host.querySelector('#' + editorId);
   const status = host.querySelector('#' + statusId);
   const saveBtn = host.querySelector('#' + saveId);
@@ -1438,7 +1544,32 @@ function enterEditMode(relPath, doc, opts = {}) {
     const b = document.getElementById(id);
     if (b) b.disabled = true;
   });
+  if (opts.mobile) {
+    host.classList.add('is-editing');
+    host.scrollTop = 0;
+    // 原文完整保留，初始光标定位正文，避开可能很长的内嵌封面元数据。
+    const bodyStart = doc.content.length - AtlasReader.body(doc.content).length;
+    editor.setSelectionRange(bodyStart, bodyStart);
+  }
   editor.focus();
+  if (opts.mobile) {
+    host.scrollTop = 0;
+    const bodyStart = doc.content.length - AtlasReader.body(doc.content).length;
+    if (bodyStart && editor.clientWidth) {
+      // 用同宽排版测量正文起点，避免长封面数据在编辑首屏占满视口。
+      const measure = document.createElement('div');
+      const style = getComputedStyle(editor);
+      measure.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;white-space:pre-wrap;overflow-wrap:break-word;box-sizing:border-box;';
+      for (const property of ['fontFamily', 'fontSize', 'lineHeight', 'letterSpacing', 'padding']) measure.style[property] = style[property];
+      measure.style.width = editor.clientWidth + 'px';
+      measure.append(document.createTextNode(doc.content.slice(0, bodyStart)));
+      const caret = document.createElement('span');
+      caret.textContent = '|'; measure.append(caret);
+      document.body.append(measure);
+      editor.scrollTop = Math.max(0, caret.offsetTop - parseFloat(style.paddingTop));
+      measure.remove();
+    }
+  }
   editState = { editor, doc, saving: false, status };
   cancelBtn.onclick = () => {
     if (!canLeaveEditor()) return;
@@ -1492,10 +1623,17 @@ function enterEditMode(relPath, doc, opts = {}) {
 async function renderSearch(q, epoch = ++viewEpoch) {
   if (!q) { renderView(); return; }
   const target = renderTarget();
+  if (isMobile()) {
+    $('#m-chips').style.display = 'none';
+    $('#m-viewhead').style.display = 'flex';
+    $('#m-title').textContent = '搜索';
+    $('#m-sub').textContent = `「${q}」`;
+  }
   target.innerHTML = emptyState('正在搜索…');
   const r = await fetch('/api/search?q=' + encodeURIComponent(q));
   const j = await r.json();
   if (!isCurrentView(epoch)) return;
+  if (isMobile()) $('#m-sub').textContent = `「${q}」 · ${j.results.length} 篇命中`;
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hl = (text) => {
     let s = esc(text);
@@ -1512,9 +1650,7 @@ async function renderSearch(q, epoch = ++viewEpoch) {
         ${res.snippets.map(s => `<div class="r-snippet">…${hl(s)}…</div>`).join('')}
       </div>`).join('');
   if (!j.results.length) {
-    target.innerHTML = isMobile()
-      ? `<div class="m-viewhead" style="display:flex"><b>搜索</b></div>` + emptyState(`没有找到与「${esc(q)}」相关的内容`)
-      : emptyState(`没有找到与「${esc(q)}」相关的内容`);
+    target.innerHTML = emptyState(`没有找到与「${esc(q)}」相关的内容`);
     return;
   }
   if (isMobile()) {
@@ -1550,7 +1686,10 @@ window.addEventListener('scroll', updateProgress, { passive: true });
 
 /* ============ 总渲染 ============ */
 function showViewError(error, epoch = viewEpoch) {
-  if (isCurrentView(epoch)) main.innerHTML = emptyState(esc(error.message || '加载失败，请重试'));
+  if (isCurrentView(epoch)) {
+    const target = isMobile() && route.view === 'doc' ? $('#m-reader-body') : renderTarget();
+    target.innerHTML = emptyState(esc(error.message || '加载失败，请重试'));
+  }
 }
 function renderView() {
   if (location.hash !== acceptedHash && !canLeaveEditor()) {
@@ -1559,7 +1698,12 @@ function renderView() {
   }
   clearEditor();
   acceptedHash = location.hash;
+  if (route.view !== 'doc') mobileReturnRoute = { ...route };
   route = parseHash();
+  if (route.view !== 'doc') {
+    $('#m-reader-shell').classList.remove('on');
+    forceCloseRmenu();
+  }
   const epoch = ++viewEpoch;
   toggleSidebar(false);
   document.title = 'Atlas · 知识库工作台';
@@ -1618,7 +1762,12 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (editState) return;                 // 编辑中不触发返回，避免误丢内容（桌面与移动端）
-    if (isMobile()) { mCloseReader(); return; }
+    if (isMobile()) {
+      if ($('#sidebar').classList.contains('is-open') || $('#m-searchpane').classList.contains('on') || $('#m-rmenu').classList.contains('on')) closeAllOverlays();
+      else if ($('#m-mepage').classList.contains('on')) $('#m-mepage').classList.remove('on');
+      else mCloseReader();
+      return;
+    }
     if (parseHash().view === 'doc') history.back();
     else if (parseHash().view === 'search') { $('#search-input').value = ''; setRoute('all'); }
   }
@@ -1645,7 +1794,7 @@ function openMask() { $('#m-mask').classList.add('on'); }
 function closeAllOverlays() {
   $('#m-mask').classList.remove('on');
   $('#m-searchpane').classList.remove('on');
-  $('#m-rmenu').classList.remove('on');
+  forceCloseRmenu();
   toggleSidebar(false);
 }
 function openRandomDoc() {
@@ -1723,7 +1872,7 @@ function bindSwipeBack(el, onBack) {
 }
 bindSwipeBack($('#m-reader-shell'), mCloseReader);
 bindSwipeBack($('#m-mepage'), () => $('#m-mepage').classList.remove('on'));
-bindSwipeBack($('#sidebar'), () => { toggleSidebar(false); openMask(); });
+bindSwipeBack($('#sidebar'), () => toggleSidebar(false));
 
 /* ---- 底栏 ---- */
 $('#m-tabbar').querySelectorAll('.m-item').forEach(btn => {
@@ -1869,6 +2018,7 @@ async function loadAuth() {
 
 /* ============ 启动 ============ */
 (async function init() {
+  renderTarget().innerHTML = emptyState('正在加载笔记…');
   try { await Promise.all([loadCards(), loadTree()]); renderView(); }
   catch (error) { showViewError(error); }
   if (isMobile()) loadAuth();

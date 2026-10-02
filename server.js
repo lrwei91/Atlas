@@ -209,7 +209,7 @@ function buildCards(dirFilter) {
       size: st.size,
       excerpt: excerptFrom(content),
       dir: path.dirname(rel) === '.' ? '' : path.dirname(rel),
-      chars: content.length,
+      chars: reader.body(content).length,
       cover: coverFrom(content, rel),
     });
   });
