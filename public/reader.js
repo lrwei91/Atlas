@@ -17,7 +17,7 @@ function prepare(source, names = {}) {
 }
 function render(doc, options = {}) {
   const container = document.createElement('div');
-  container.innerHTML = marked.parse(prepare(doc.content, options.names), { gfm: true, breaks: true });
+  container.innerHTML = marked.parse(prepare(doc.content, doc.links ? {} : options.names), { gfm: true, breaks: true });
   container.querySelectorAll('img').forEach(img => {
     if (/\.(mp4|webm|ogv|mov|m4v)(?:[?#]|$)/i.test(img.getAttribute('src') || '')) {
       const video = document.createElement('video');
@@ -57,11 +57,30 @@ function render(doc, options = {}) {
     if (el.tagName !== 'SOURCE') { el.style.maxWidth = '100%'; el.style.height = 'auto'; }
   });
   container.querySelectorAll('video').forEach(el => { if (!el.getAttribute('src') && !el.querySelector('source[src]')) { const p = document.createElement('p'); p.textContent = '视频文件未找到'; el.after(p); } });
-  if (options.shared) container.querySelectorAll('a[href^="#doc="]').forEach(a => { a.removeAttribute('href'); a.title = '此链接未分享'; });
+  container.querySelectorAll('a[href]').forEach(a => {
+    const href = a.getAttribute('href');
+    const link = doc.links?.[href];
+    if (!link) return;
+    if (link.type === 'document') {
+      if (options.shared && link.path !== doc.relPath) { a.removeAttribute('href'); a.title = '此文档未分享'; return; }
+      a.href = '#doc=' + encodeURIComponent(link.path);
+      a.dataset.documentPath = link.path;
+      if (link.fragment) a.dataset.documentHeading = link.fragment;
+    } else if (link.type === 'asset' && (!options.shared || Object.values(doc.assets || {}).includes(link.path))) {
+      a.href = options.assetUrl(link.path); a.target = '_blank'; a.rel = 'noopener';
+    } else { a.removeAttribute('href'); a.title = link.type === 'missing' ? '链接目标不存在或路径不明确' : '此附件未分享'; }
+  });
+  if (options.shared) container.querySelectorAll('a[href^="#doc="]').forEach(a => { if (!a.dataset.documentHeading) { a.removeAttribute('href'); a.title = '此链接未分享'; } });
   container.querySelectorAll('pre code').forEach(el => { try { if (typeof hljs !== 'undefined') hljs.highlightElement(el); } catch {} });
   return container.innerHTML;
 }
-const api = { body, prepare, render };
+function scrollToHeading(container, fragment) {
+  const key = value => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const heading = [...container.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(el => el.id === fragment || key(el.textContent) === key(fragment));
+  if (heading) heading.scrollIntoView?.({ block: 'start' });
+  return !!heading;
+}
+const api = { body, prepare, render, scrollToHeading };
 if (typeof module === 'object' && module.exports) module.exports = api;
 else root.AtlasReader = api;
 })(typeof window !== 'undefined' ? window : globalThis);

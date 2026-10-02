@@ -38,7 +38,16 @@ async function body(req) {
 }
 async function handle(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/auth/status') {
-    json(res, 200, { setupRequired: !fs.existsSync(adminFile), authenticated: !!session(req), publicUrl: process.env.ATLAS_PUBLIC_URL || null }); return true;
+    const current = session(req);
+    let username = null;
+    try { if (fs.existsSync(adminFile)) username = JSON.parse(fs.readFileSync(adminFile, 'utf8')).username; } catch {}
+    json(res, 200, {
+      setupRequired: !fs.existsSync(adminFile),
+      authenticated: !!current,
+      username,
+      expiresAt: current ? current.expires : null,
+      publicUrl: process.env.ATLAS_PUBLIC_URL || null,
+    }); return true;
   }
   if (!['/auth/setup', '/auth/login', '/auth/logout'].includes(pathname)) return false;
   if (req.method !== 'POST') { json(res, 405, { error: '请使用 POST' }); return true; }

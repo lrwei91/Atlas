@@ -57,7 +57,38 @@ const fs = require('fs');
   check('分享联动撤销', shareAfter.status === 404 || shareAfterJson.url === null);
   check('重复删除 404', (await api('DELETE', q(delTarget))).status === 404);
 
+  /* ---- 新建文档（POST /api/doc）---- */
+  const newRel = '10-工作/新建靶子.md';
+  const newQ = q(newRel);
+  check('POST 错误 Origin 拒绝', (await api('POST', newQ, { title: 'x' }, 'https://evil.example')).status === 403);
+  check('POST 非 md 拒绝', (await api('POST', q('10-工作/x.txt'), { title: 'x' })).status === 400);
+  check('POST 路径穿越拒绝', (await api('POST', q('../逃逸.md'), { title: 'x' })).status === 400);
+  check('POST 目录不存在 404', (await api('POST', q('不存在目录/x.md'), { title: 'x' })).status === 404);
+  check('POST 空标题 400', (await api('POST', newQ, { title: '   ' })).status === 400);
+  check('POST 标题超长 400', (await api('POST', newQ, { title: 'x'.repeat(200) })).status === 400);
+  check('POST 标题含换行 400', (await api('POST', newQ, { title: 'a\nb' })).status === 400);
+
+  const created = await api('POST', newQ, { title: '新建靶子' });
+  check('POST 创建返回 200', created.status === 200);
+  const createdJson = await created.json();
+  check('创建结果路径正确', createdJson.relPath === newRel);
+  check('磁盘已写入骨架', fs.readFileSync(vault + '/notes/' + newRel, 'utf8') === '# 新建靶子\n\n');
+  const readBack = await (await api('GET', newQ)).json();
+  check('新文档可读回', readBack.content === '# 新建靶子\n\n' && readBack.title === '新建靶子');
+  check('卡片列表包含新文档', (await (await api('GET', '/api/cards')).json()).cards.some(c => c.relPath === newRel));
+  // 同名不覆盖：应生成带时间戳的新文件，原文件内容不变
+  const again = await api('POST', newQ, { title: '新建靶子' });
+  const againJson = await again.json();
+  check('同名创建不覆盖', againJson.relPath !== newRel && againJson.relPath.startsWith('10-工作/新建靶子-'));
+  check('原文件内容未被覆盖', fs.readFileSync(vault + '/notes/' + newRel, 'utf8') === '# 新建靶子\n\n');
+  // 清理
+  for (const rel of [newRel, againJson.relPath]) {
+    const abs = vault + '/notes/' + rel;
+    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+  }
+  check('清理后卡片列表已移除', !((await (await api('GET', '/api/cards')).json()).cards.some(c => c.relPath === newRel)));
+
   const failed = results.filter(([, ok]) => !ok);
-  console.log(failed.length ? `❌ ${failed.length} 项失败` : `✅ 写入/删除测试全部通过（${results.length} 项）`);
+  console.log(failed.length ? `❌ ${failed.length} 项失败` : `✅ 写入/新建测试全部通过（${results.length} 项）`);
   process.exit(failed.length ? 1 : 0);
 })().catch((e) => { console.error('测试脚本异常:', e); process.exit(1); });

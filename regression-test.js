@@ -151,6 +151,38 @@ async function frontendTests() {
     const titles = [...w.document.querySelectorAll('.c-title')].map(el => el.textContent);
     assert.deepEqual(titles, [...titles].sort((a, b) => a.localeCompare(b, 'zh-CN')));
 
+    const originalA = documents.get('A.md');
+    documents.set('A.md', { ...originalA, content: '# A.md\n## 本文标题\n[[notes/B#B.md|跳转B]]\n[[#本文标题|页内标题]]\n[[resources/video.mp4|附件]]',
+      links: { '#doc=notes%2FB%23B.md': {type:'document',path:'B.md',fragment:'B.md'}, '#doc=%23%E6%9C%AC%E6%96%87%E6%A0%87%E9%A2%98': {type:'document',path:'A.md',fragment:'本文标题'}, '#doc=resources%2Fvideo.mp4': {type:'asset',path:'resources/video.mp4'} } });
+    await navigate('doc', 'A.md');
+    const callsBeforeHeading = calls.filter(c=>c.url.startsWith('/api/doc')).length;
+    w.document.querySelector('a[data-document-heading="本文标题"]').click(); await pause(10);
+    assert.equal(calls.filter(c=>c.url.startsWith('/api/doc')).length, callsBeforeHeading);
+    assert.equal(w.document.querySelector('a[href="/files/resources/video.mp4"]').getAttribute('target'), '_blank');
+    w.document.querySelector('a[data-document-path="B.md"]').click(); await pause(20);
+    assert.equal(w.parseHash().param, 'B.md');
+    assert.match(w.document.querySelector('.article').textContent, /B.md/);
+    assert.equal(calls.some(c=>c.url===docURL('notes/B#B.md')),false);
+    documents.set('A.md', originalA);
+
+    cards[0].isShared = true;
+    await navigate('all');
+    const shareNav = w.document.querySelector('[data-route="shared"]');
+    assert.equal(shareNav.querySelector('.name').textContent, '分享笔记');
+    assert.equal(shareNav.previousElementSibling.querySelector('.name').textContent, '全部笔记');
+    assert.equal(shareNav.querySelector('.cnt').textContent, '1');
+    shareNav.click(); await pause(20);
+    assert.equal(w.parseHash().view, 'shared');
+    assert.equal(w.document.querySelector('.view-head h1').textContent, '分享笔记');
+    assert.equal(w.document.querySelectorAll('.card').length, 1);
+    w.document.querySelector('.card').click(); await pause(20);
+    assert.equal(w.parseHash().param, cards[0].relPath);
+    cards[0].isShared = false;
+    await navigate('shared');
+    assert.equal(w.document.querySelectorAll('.card').length, 0);
+    assert.match(w.document.querySelector('#main').textContent, /暂无已分享的笔记/);
+    await navigate('all');
+
     deferDocs = true;
     await navigate('doc', 'A.md'); await navigate('doc', 'B.md');
     pending.get(docURL('B.md'))(reply(documents.get('B.md'))); await pause(10);

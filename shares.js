@@ -14,4 +14,5 @@ function find(rel) { return Object.entries(load()).find(([,v]) => v.relPath === 
 function create(rel) { const existing = find(rel); if (existing) return existing; const all = load(); const token = crypto.randomBytes(32).toString('hex'); all[token] = { relPath: rel, createdAt: new Date().toISOString() }; save(all); return token; }
 function revoke(rel) { const all = load(); for (const [token,value] of Object.entries(all)) if (value.relPath === rel) delete all[token]; save(all); }
 function get(token) { if (!/^[a-f0-9]{64}$/.test(token)) return null; return load()[token] || null; }
-module.exports = { find, create, revoke, get };
+function paths() { return new Set(Object.values(load()).map(value => value.relPath)); }
+module.exports = { find, create, revoke, get, paths };

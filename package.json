@@ -4,7 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "node regression-test.js && node auth-test.js",
+    "test": "node link-test.js && node regression-test.js && node auth-test.js",
     "test:performance": "node performance-test.js",
     "start": "node server.js"
   },

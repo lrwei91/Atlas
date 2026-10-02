@@ -1,0 +1,46 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const {JSDOM} = require('jsdom');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-links-'));
+const vault = fs.realpathSync(tmp);
+function safe(base, rel) { try { const root = fs.realpathSync(base), full = fs.realpathSync(path.resolve(base, rel)); return (full === root || full.startsWith(root + path.sep)) && !path.relative(root, full).split(path.sep).some(p => p.startsWith('.')) ? full : null; } catch { return null; } }
+try {
+  for (const dir of ['notes/目录','notes/其他','notes/第三','resources/videos','resources/images']) fs.mkdirSync(path.join(vault,dir), {recursive:true});
+  fs.writeFileSync(path.join(vault,'notes/目录/目标 v1.0.md'),'# 目标\n## 中文标题');
+  fs.writeFileSync(path.join(vault,'notes/其他/重复.md'),'# 重复');
+  fs.writeFileSync(path.join(vault,'notes/第三/重复.md'),'# 重复');
+  fs.writeFileSync(path.join(vault,'resources/videos/中文 视频.mp4'),'video');
+  fs.writeFileSync(path.join(vault,'resources/images/中文 图片.png'),'image');
+  fs.writeFileSync(path.join(vault,'resources/private.txt'),'private');
+  const rel='目录/来源.md';
+  const content = '# 来源\n## 本文标题\n[[notes/目录/目标 v1.0#中文标题|主库链接]]\n[[目标 v1.0|同目录]]\n[[目录/目标 v1.0.md]]\n[[#本文标题]]\n[[重复]]\n[[../不存在]]\n[Markdown](./目标%20v1.0.md#中文标题)\n[[resources/videos/中文 视频.mp4|视频]]\n[图片](../../resources/images/中文%20图片.png)\n![[resources/images/中文 图片.png]]\n![[resources/videos/中文 视频.mp4]]\n[private](../../resources/private.txt)';
+  fs.writeFileSync(path.join(vault,'notes',rel),content);
+  const docs=require('./documents')(vault,safe);
+  const doc=docs.read(rel);
+  const wiki=target=>'#doc='+encodeURIComponent(target);
+  for (const target of ['notes/目录/目标 v1.0#中文标题','目标 v1.0','目录/目标 v1.0.md']) assert.equal(doc.links[wiki(target)].path,'目录/目标 v1.0.md');
+  assert.equal(doc.links[wiki('#本文标题')].path,rel);
+  assert.equal(doc.links[wiki('重复')].type,'missing');
+  assert.equal(doc.links[wiki('../不存在')].type,'missing');
+  assert.equal(Object.entries(doc.links).find(([href]) => href.startsWith('./'))[1].fragment,'中文标题');
+  assert.equal(doc.links[wiki('resources/videos/中文 视频.mp4')].type,'asset');
+  assert.equal(doc.assets[wiki('resources/videos/中文 视频.mp4')],'resources/videos/中文 视频.mp4');
+  const dom=new JSDOM('',{runScripts:'outside-only'});
+  dom.window.eval(fs.readFileSync(path.join(__dirname,'public/vendor/marked.min.js'),'utf8'));
+  dom.window.eval(fs.readFileSync(path.join(__dirname,'public/reader.js'),'utf8'));
+  const render=shared=>new JSDOM(dom.window.AtlasReader.render(doc,{shared,assetUrl:p=>'/files/'+p.split('/').map(encodeURIComponent).join('/')}));
+  const privateView=render(false),publicView=render(true);
+  assert.equal(privateView.window.document.querySelector('a[data-document-heading="中文标题"]').getAttribute('href'),'#doc='+encodeURIComponent('目录/目标 v1.0.md'));
+  assert.equal(privateView.window.document.querySelector('a[title="链接目标不存在或路径不明确"]').hasAttribute('href'),false);
+  assert.ok(privateView.window.document.querySelector('a[href*="/files/resources/videos/"]'));
+  assert.ok(publicView.window.document.querySelector('a[href*="/files/resources/videos/"]'));
+  assert.equal(publicView.window.document.querySelector('a[title="此文档未分享"]').hasAttribute('href'),false);
+  assert.equal(publicView.window.document.querySelector('a[title="此附件未分享"]').hasAttribute('href'),false);
+  assert.ok(publicView.window.document.querySelector('a[data-document-heading="本文标题"]'));
+  assert.equal(dom.window.AtlasReader.scrollToHeading(privateView.window.document.body,'本文标题'),true);
+  for (const d of [dom,privateView,publicView]) d.window.close();
+  console.log('PASS: vault/relative/encoded/wiki/heading links, resources images/videos, ambiguous/missing links, share isolation');
+} finally { fs.rmSync(tmp,{recursive:true,force:true}); }

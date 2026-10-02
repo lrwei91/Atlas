@@ -60,6 +60,23 @@ function statOrNull(p) {
   try { return fs.statSync(p); } catch { return null; }
 }
 
+/* 解析「即将创建」的路径：目标文件尚不存在，realpathSync 会失败，
+   因此只校验 base 的realpath 与父目录的 realpath，并拒绝隐藏段与穿越。 */
+function safeResolveForCreate(base, rel) {
+  const resolved = path.resolve(base, rel);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
+  const dir = path.dirname(resolved);
+  let realDir;
+  try { realDir = fs.realpathSync(dir); } catch { return null; }   // 父目录必须已存在
+  let realBase;
+  try { realBase = fs.realpathSync(base); } catch { return null; }
+  if (realDir !== realBase && !realDir.startsWith(realBase + path.sep)) return null;
+  // 必须用 realDir 计算相对路径：软链目录（如 /var→ /private/var）会让原始 dir 算出大量 '..' 而被误判为穿越
+  const rest = path.relative(realBase, realDir);
+  if (rest.split(path.sep).some(part => part.startsWith('.'))) return null;
+  return path.join(realDir, path.basename(resolved));
+}
+
 function excerptFrom(content) {
   const lines = content.split('\n');
   let inFence = false;
@@ -92,6 +109,52 @@ function walk(dir, cb) {
 }
 
 function relToNotes(full) { return path.relative(NOTES, full).split(path.sep).join('/'); }
+
+/* 卡片封面：取正文首张图片（Obsidian ![[...]] 与 Markdown/HTML 图片），视频不算。
+   命中本地文件时返回可访问的 /files/ 路径，避免前端二次解析。 */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+function coverFrom(content, rel) {
+  const source = content.replace(/^[\s\S]*?(?:\r?\n)?---[\s\S]*?(?:\r?\n)?(?:---|\.\.\.)[\s\S]*?(?:\r?\n)?/, '');
+  const patterns = [
+    /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // Obsidian 内嵌图片
+    /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,       // Markdown 图片
+    /<img[^>]+src=["']([^"']+)["']/gi,                  // HTML 图片
+  ];
+  const candidates = [];
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(source))) {
+      const raw = m[1].split(/[?#]/)[0].trim();
+      if (raw && !/^(https?:|data:|file:)/i.test(raw)) candidates.push(raw);
+      if (candidates.length >= 8) break;
+    }
+    if (candidates.length) break;
+  }
+  for (const raw of candidates) {
+    let target = decodeURIComponent(raw).replace(/^\/files\//, '').replace(/^\.\//, '');
+    const bases = [
+      path.posix.join('notes', path.posix.dirname(rel), target),
+      target.replace(/^\//, ''),
+      'resources/' + path.posix.basename(target),
+    ];
+    for (const candidate of bases) {
+      if (!IMAGE_EXT.test(candidate)) continue;
+      const abs = safeResolve(VAULT, candidate);
+      if (abs && statOrNull(abs)?.isFile()) {
+        // safeResolve 返回 realpath，VAULT 未必是；两侧都取realpath 再求相对路径，
+        // 否则软链目录（如 /var → /private/var）会算出带 ../../ 的越界路径
+        let relToVault;
+        try { relToVault = path.relative(fs.realpathSync(VAULT), abs); }
+        catch { relToVault = path.relative(VAULT, abs); }
+        const normalized = relToVault.split(path.sep).join('/');
+        if (normalized.startsWith('..')) continue;   // 越界则不作为封面
+        return '/files/' + normalized;
+      }
+    }
+  }
+  return null;
+}
 
 /* ---------- API 实现 ---------- */
 
@@ -141,6 +204,7 @@ function buildCards(dirFilter) {
       excerpt: excerptFrom(content),
       dir: path.dirname(rel) === '.' ? '' : path.dirname(rel),
       chars: content.length,
+      cover: coverFrom(content, rel),
     });
   });
   noteCache.prune(liveFiles);
@@ -268,10 +332,51 @@ const server = http.createServer(async (req, res) => {
       const token = shares.find(rel);
       sendJSON(res, 200, { url: token ? (process.env.ATLAS_PUBLIC_URL || '') + '/share/' + token : null }); return;
     }
-    if (p === '/api/doc' && (req.method === 'PUT' || req.method === 'DELETE')) {
+    if (p === '/api/doc' && (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
       const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;
       if (req.headers.origin !== expected) { sendJSON(res, 403, { error: '请求来源无效' }); return; }
       const rel = u.searchParams.get('path') || '';
+      if (req.method === 'POST') {
+        // 创建新文档：仅允许 .md，父目录必须已存在，wx 排他创建避免覆盖同名文件
+        const rel = u.searchParams.get('path') || '';
+        if (path.extname(rel).toLowerCase() !== '.md') {
+          sendJSON(res, 400, { error: '只能创建 Markdown 文档' }); return;
+        }
+        if (!rel || rel.includes('\0') || /(^|\/)\.\.?(\/|$)/.test(rel) || rel.split('/').some(part => !part)) {
+          sendJSON(res, 400, { error: '路径格式无效' }); return;
+        }
+        const parentRel = path.posix.dirname(rel);
+        const parentAbs = parentRel === '.' ? null : safeResolve(NOTES, parentRel);
+        if (!parentRel || parentRel === '.' || !parentAbs || !statOrNull(parentAbs)?.isDirectory()) {
+          sendJSON(res, 404, { error: '目标目录不存在，请先在 Obsidian 中创建' }); return;
+        }
+        const abs = safeResolveForCreate(NOTES, rel);
+        if (!abs) { sendJSON(res, 400, { error: '路径不合法' }); return; }
+        let title;
+        try {
+          const raw = await readBody(req, 64 * 1024);
+          const payload = JSON.parse(raw);
+          title = typeof payload.title === 'string' ? payload.title.trim() : '';
+        } catch { sendJSON(res, 400, { error: '请求格式无效' }); return; }
+        if (!title || title.length > 120) { sendJSON(res, 400, { error: '请填写标题（不超过 120 字）' }); return; }
+        if (title.includes('\n') || title.includes('\r')) { sendJSON(res, 400, { error: '标题不能包含换行' }); return; }
+        // 同名加时间戳后缀，绝不覆盖已有文档
+        let target = abs, finalRel = rel;
+        if (statOrNull(target)) {
+          const ext = path.extname(abs), stem = abs.slice(0, -ext.length);
+          finalRel = rel.slice(0, -4) + '-' + Date.now() + '.md';
+          target = stem + '-' + Date.now() + ext;
+        }
+        try {
+          fs.writeFileSync(target, `# ${title}\n\n`, { encoding: 'utf8', flag: 'wx', mode: 0o644 });
+        } catch (e) {
+          if (e.code === 'EEXIST') { sendJSON(res, 409, { error: '同名文档已存在' }); return; }
+          sendJSON(res, 500, { error: '创建失败，原文件未改动' }); return;
+        }
+        const st = fs.statSync(target);
+        sendJSON(res, 200, { ok: true, relPath: path.relative(fs.realpathSync(NOTES), target).split(path.sep).join('/'), version: versionOf(`# ${title}\n\n`), mtime: st.mtimeMs, size: st.size });
+        return;
+      }
       const abs = safeResolve(NOTES, rel);
       if (!abs || !statOrNull(abs) || !statOrNull(abs).isFile() || path.extname(abs).toLowerCase() !== '.md') {
         sendJSON(res, 404, { error: '文档不存在或不是 Markdown' }); return;
@@ -329,7 +434,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/tree') { sendJSON(res, 200, buildTree()); return; }
     if (p === '/api/cards') {
       const dir = u.searchParams.get('dir') || '';
-      sendJSON(res, 200, { cards: buildCards(dir) });
+      const sharedPaths = shares.paths();
+      sendJSON(res, 200, { cards: buildCards(dir).map(card => ({ ...card, isShared: card.isMarkdown && sharedPaths.has(card.relPath) })) });
       return;
     }
     if (p === '/api/doc') {
