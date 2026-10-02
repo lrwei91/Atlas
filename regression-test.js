@@ -69,6 +69,27 @@ async function serverTests() {
     assert.equal((await put({ content: '# Tab two', version: both.version })).status, 409);
     assert.equal((await getDoc()).content, '# Tab one');
     assert.equal(fs.readdirSync(path.join(vault, 'notes')).some(n => n.includes('atlas-tmp')), false);
+    // Frontmatter covers feed the existing mobile card field without leaking into excerpts.
+    const inlineCover = 'data:image/jpeg;base64,/9j/2Q==';
+    fs.writeFileSync(path.join(vault, 'resources', 'body.png'), Buffer.from('image'));
+    const coverNotes = {
+      'cover.md': `---\n![封面](${inlineCover})\n---\n# 封面测试\n这是应当显示的正文摘要。\n![](resources/body.png)`,
+      'cover-crlf.md': `\uFEFF---\r\n![封面](${inlineCover})\r\n...\r\n# Cover`,
+      'cover-body.md': '# Body\n![](resources/body.png)\n---\nLater\n---',
+      'cover-unsafe.md': '---\n![封面](data:text/html;base64,AAAA)\n---\n# Unsafe\n![](resources/body.png)',
+      'cover-percent.md': '# Percent\n![](bad%.png)',
+    };
+    for (const [name, text] of Object.entries(coverNotes)) fs.writeFileSync(path.join(vault, 'notes', name), text);
+    const coverCards = (await (await fetch(base + '/api/cards', { headers: headers() })).json()).cards;
+    const coverCard = name => coverCards.find(card => card.relPath === name);
+    assert.equal(coverCard('cover.md').cover, inlineCover);
+    assert.equal(coverCard('cover.md').excerpt, '这是应当显示的正文摘要。');
+    assert.equal(coverCard('cover-crlf.md').cover, inlineCover);
+    assert.equal(coverCard('cover-body.md').cover, '/files/resources/body.png');
+    assert.equal(coverCard('cover-unsafe.md').cover, '/files/resources/body.png');
+    assert.equal(coverCard('cover-percent.md').cover, null);
+    for (const name of Object.keys(coverNotes)) fs.unlinkSync(path.join(vault, 'notes', name));
+    console.log('PASS: frontmatter inline covers, body fallback, safe image types, metadata-free excerpts');
     const readBody = require('./request-body');
     await assert.rejects(readBody((async function* () { yield Buffer.from('123'); yield Buffer.from('456'); })(), 5));
 
@@ -140,6 +161,10 @@ async function frontendTests() {
     for (const file of ['vendor/marked.min.js', 'reader.js']) w.eval(fs.readFileSync(path.join(__dirname, 'public', file), 'utf8'));
     w.eval(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
     await waitFor(() => w.document.querySelectorAll('.card').length === cards.length);
+    const mobileCover = 'data:image/jpeg;base64,/9j/2Q==';
+    const mobileCard = w.document.createElement('div');
+    mobileCard.innerHTML = w.mCardHTML({ ...cards[0], cover: mobileCover }, 0);
+    assert.equal(mobileCard.querySelector('.cover-img img').getAttribute('src'), mobileCover);
     assert.equal(w.document.querySelector('.c-badge img'), null);
     const maliciousCard = [...w.document.querySelectorAll('.card')].find(el => el.dataset.rel === malicious + '/note.md');
     assert.equal(maliciousCard.querySelector('.c-badge').textContent, malicious);

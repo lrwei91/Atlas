@@ -20,6 +20,7 @@ const auth = require('./auth');
 const shares = require('./shares');
 const readBody = require('./request-body');
 const versionOf = require('./document-version');
+const reader = require('./public/reader');
 
 const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/iCloud~md~obsidian/Documents/主库');
 const NOTES = path.join(VAULT, 'notes');
@@ -78,7 +79,7 @@ function safeResolveForCreate(base, rel) {
 }
 
 function excerptFrom(content) {
-  const lines = content.split('\n');
+  const lines = reader.body(content).split('\n');
   let inFence = false;
   for (const raw of lines) {
     const line = raw.trim();
@@ -110,11 +111,14 @@ function walk(dir, cb) {
 
 function relToNotes(full) { return path.relative(NOTES, full).split(path.sep).join('/'); }
 
-/* 卡片封面：取正文首张图片（Obsidian ![[...]] 与 Markdown/HTML 图片），视频不算。
+/* 卡片封面：优先引用 frontmatter 内嵌封面，否则取正文首张本地图片，视频不算。
    命中本地文件时返回可访问的 /files/ 路径，避免前端二次解析。 */
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 function coverFrom(content, rel) {
-  const source = content.replace(/^[\s\S]*?(?:\r?\n)?---[\s\S]*?(?:\r?\n)?(?:---|\.\.\.)[\s\S]*?(?:\r?\n)?/, '');
+  const source = reader.body(content);
+  const frontmatter = content.slice(0, content.length - source.length);
+  const embeddedCover = frontmatter.match(/!\[[^\]\r\n]*\]\((data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2})\)/i);
+  if (embeddedCover) return embeddedCover[1];
   const patterns = [
     /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // Obsidian 内嵌图片
     /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,       // Markdown 图片
@@ -132,7 +136,9 @@ function coverFrom(content, rel) {
     if (candidates.length) break;
   }
   for (const raw of candidates) {
-    let target = decodeURIComponent(raw).replace(/^\/files\//, '').replace(/^\.\//, '');
+    let target = raw;
+    try { target = decodeURIComponent(target); } catch {}
+    target = target.replace(/^\/files\//, '').replace(/^\.\//, '');
     const bases = [
       path.posix.join('notes', path.posix.dirname(rel), target),
       target.replace(/^\//, ''),
