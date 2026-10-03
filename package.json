@@ -4,7 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "node link-test.js && node regression-test.js && node auth-test.js && node view-cache-test.js && node touch-layout-test.js",
+    "test": "node text-count-test.js && node link-test.js && node regression-test.js && node auth-test.js && node guest-test.js && node view-cache-test.js && node touch-layout-test.js",
     "test:performance": "node performance-test.js",
     "start": "node server.js"
   },

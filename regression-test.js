@@ -74,8 +74,17 @@ async function serverTests() {
     fs.writeFileSync(path.join(vault, 'resources', 'body.png'), Buffer.from('image'));
     fs.mkdirSync(path.join(vault, 'resources', 'fallback-covers'));
     fs.writeFileSync(path.join(vault, 'resources', 'fallback-covers', '工具 封面.png'), Buffer.from('fallback'));
+    fs.mkdirSync(path.join(vault, 'resources', 'attachments', 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(vault, 'resources', 'attachments', 'nested', 'original.png'), 'original');
     const coverNotes = {
       'cover-field.md': '---\ncover: "resources/fallback-covers/工具 封面.png"\n---\n# 字段封面\n这是应当显示的正文摘要。\n![](resources/body.png)',
+      'cover-fallback-only.md': '---\ncover: "resources/fallback-covers/工具 封面.png"\n---\n# 没有图片',
+      'cover-body-data.md': `---\ncover: resources/fallback-covers/工具 封面.png\n---\n# Body\n![](${inlineCover})`,
+      'cover-body-remote.md': '---\ncover: resources/fallback-covers/工具 封面.png\n---\n# Body\n![](https://example.com/original.jpg)',
+      'cover-mixed.md': '# Mixed\n<img src="resources/body.png">\n![[resources/fallback-covers/工具 封面.png]]',
+      'cover-code.md': '# Code\n```md\n![](resources/fallback-covers/工具 封面.png)\n```\n![original][image]\n\n[image]: resources/body.png',
+      'cover-attachment.md': '---\ncover: resources/fallback-covers/工具 封面.png\n---\n# Attachment\n![[original.png|300]]',
+      'cover-live.md': '---\ncover: resources/fallback-covers/工具 封面.png\n---\n# Live\n![](resources/live.png)',
       'cover-field-data.md': `---\ncover: '${inlineCover}'\n---\n# AI cover`,
       'cover-field-wiki.md': '---\ncover: "[[resources/body.png]]"\n---\n# Wiki',
       'cover-field-relative.md': '---\ncover: ../resources/body.png # cover\n---\n# Relative',
@@ -84,7 +93,8 @@ async function serverTests() {
       'cover-field-priority.md': `---\ncover: resources/body.png\n![封面](${inlineCover})\n---\n# Priority`,
       'cover-field-body.md': '# Body\ncover: resources/body.png',
       '00-notes-index.md': '# Notes Index\nIndex remains readable.',
-      'cover.md': `---\n![封面](${inlineCover})\n---\n# 封面测试\n这是应当显示的正文摘要。\n![](resources/body.png)`,
+      'cover.md': `---\n![封面](${inlineCover})\n---\n# 封面测试\n这是应当显示的正文摘要。`,
+      'cover-legacy-body.md': `---\n![封面](${inlineCover})\n---\n# Legacy\n![](resources/body.png)`,
       'cover-crlf.md': `\uFEFF---\r\n![封面](${inlineCover})\r\n...\r\n# Cover`,
       'cover-tall.md': '---\n![封面](data:image/jpeg;base64,' + Buffer.from('ffd8ffc000070804b00258ffd9', 'hex').toString('base64') + ')\n---\n# Tall',
       'cover-body.md': '# Body\n![](resources/body.png)\n---\nLater\n---',
@@ -94,10 +104,23 @@ async function serverTests() {
     for (const [name, text] of Object.entries(coverNotes)) fs.writeFileSync(path.join(vault, 'notes', name), text);
     const coverCards = (await (await fetch(base + '/api/cards', { headers: headers() })).json()).cards;
     const coverCard = name => coverCards.find(card => card.relPath === name);
-    assert.equal(coverCard('cover-field.md').cover, '/files/resources/fallback-covers/' + encodeURIComponent('工具 封面.png'));
+    assert.equal(coverCard('cover-field.md').cover, '/files/resources/body.png');
+    assert.equal(coverCard('cover-fallback-only.md').cover, '/files/resources/fallback-covers/' + encodeURIComponent('工具 封面.png'));
+    assert.equal(coverCard('cover-body-remote.md').cover, 'https://example.com/original.jpg');
+    assert.equal(coverCard('cover-body-data.md').cover, '/api/cover?path=cover-body-data.md');
+    assert.equal(coverCard('cover-body-data.md').chars, 4, 'body image Base64 must not contribute to card or total character counts');
+    assert.equal((await fetch(base + coverCard('cover-body-data.md').cover, { headers: headers() })).headers.get('content-type'), 'image/jpeg');
+    for (const name of ['cover-legacy-body.md', 'cover-mixed.md', 'cover-code.md']) assert.equal(coverCard(name).cover, '/files/resources/body.png');
+    assert.equal(coverCard('cover-attachment.md').cover, '/files/resources/attachments/nested/original.png');
+    assert.equal(coverCard('cover-live.md').cover, null);
+    fs.writeFileSync(path.join(vault, 'resources', 'live.png'), 'live image');
+    const liveCards = () => fetch(base + '/api/cards', { headers: headers() }).then(res => res.json());
+    assert.equal((await liveCards()).cards.find(c => c.relPath === 'cover-live.md').cover, '/files/resources/live.png');
+    fs.unlinkSync(path.join(vault, 'resources', 'live.png'));
+    assert.equal((await liveCards()).cards.find(c => c.relPath === 'cover-live.md').cover, null);
     assert.equal(coverCard('cover-field.md').excerpt, '这是应当显示的正文摘要。');
     assert.equal(require('./public/reader').prepare(coverNotes['cover-field.md']).includes('fallback-covers'), false);
-    const fieldImage = await fetch(base + coverCard('cover-field.md').cover, { headers: headers() });
+    const fieldImage = await fetch(base + coverCard('cover-fallback-only.md').cover, { headers: headers() });
     assert.equal(fieldImage.status, 200);
     assert.equal(await fieldImage.text(), 'fallback');
     assert.equal((await fetch(base + coverCard('cover-field.md').cover)).status, 401);
@@ -111,7 +134,7 @@ async function serverTests() {
     assert.match(indexDoc.content, /Notes Index/);
     assert.equal(coverCard('cover.md').cover, '/api/cover?path=cover.md');
     assert.equal(coverCard('cover.md').excerpt, '这是应当显示的正文摘要。');
-    assert.equal(coverCard('cover.md').chars, require('./public/reader').body(coverNotes['cover.md']).length);
+    assert.equal(coverCard('cover.md').chars, '封面测试这是应当显示的正文摘要。'.length);
     assert.equal(coverCard('cover-crlf.md').cover, '/api/cover?path=cover-crlf.md');
     assert.equal(coverCard('cover-tall.md').coverWidth, 600);
     assert.equal(coverCard('cover-tall.md').coverHeight, 1200);

@@ -32,6 +32,28 @@ module.exports = function(vault, safeResolve, noteCache = require('./note-cache'
     const matches = getIndex().filter(p => p.endsWith('/' + target));
     return matches.length === 1 ? matches[0] : null;
   }
+  // One lazy, live index per operation; cards and reader use the same path rules.
+  function createImageResolver() {
+    let index;
+    return (raw, rel) => resolveImage(raw, rel, () => {
+      if (!index) {
+        index = [];
+        for (const dir of ['notes', 'resources']) {
+          const fullDir = safeResolve(vault, dir);
+          if (fullDir) images(fullDir, index);
+        }
+      }
+      return index;
+    });
+  }
+  function coverSources(content) {
+    const html = marked.parse(reader.prepare(content));
+    if (!/<img[\s>]/i.test(html)) return [];
+    const dom = new JSDOM(html);
+    try {
+      return [...dom.window.document.querySelectorAll('img[src]')].map(img => img.getAttribute('src'));
+    } finally { dom.window.close(); }
+  }
   function resolveLink(href, rel, getNotes) {
     let raw = href;
     const wiki = raw.startsWith('#doc=');
@@ -129,5 +151,5 @@ module.exports = function(vault, safeResolve, noteCache = require('./note-cache'
     const title = (reader.body(content).match(/^#\s+(.+)$/m) || [])[1] || path.basename(rel, '.md');
     return { relPath: rel, title, isMarkdown: true, content, assets, links, version, mtime: st.mtimeMs, size: st.size };
   }
-  return { read };
+  return { read, createImageResolver, coverSources };
 };

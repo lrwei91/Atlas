@@ -92,6 +92,26 @@ header {
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .stat { font-family: var(--mono); font-size: 11px; color: var(--text-subtle); white-space: nowrap; }
 .stat b { color: var(--text-secondary); font-weight: 600; }
+
+/* 游客提示条：仅 is-guest 时显示，默认 display:none 不占位。
+   位置必须跟随 --header-height（atlas-ui.css 在内联样式之后加载，会覆盖内联的 56px）。
+   --guest-bar-h 挂在 body 上而非 .guest-bar：提示条与侧栏/内容区是兄弟节点，
+   只有挂在共同祖先上，aside 与 .layout 才能继承到同一个高度变量。
+   .guest-hide 供 JS 收起写入口，需 !important 才能压过 .m-item 的 display:flex。 */
+.guest-bar, .guest-hide { display: none; }
+body.is-guest { --guest-bar-h: 34px; }
+body.is-guest .guest-bar {
+  display: flex; align-items: center;
+  position: fixed; top: var(--header-height); left: 0; right: 0; z-index: 98;
+  box-sizing: border-box; min-height: var(--guest-bar-h);
+  padding: 8px 28px; background: var(--accent); color: var(--on-accent);
+  font-size: 12px; line-height: 18px;
+}
+body.is-guest .layout { padding-top: calc(var(--header-height) + var(--guest-bar-h)); }
+body.is-guest aside { top: calc(var(--header-height) + var(--guest-bar-h)); }
+body.is-guest #progress { top: calc(var(--header-height) + var(--guest-bar-h)); }
+.guest-hide { display: none !important; }
+body.is-guest .guest-bar a { color: inherit; font-weight: 700; }
 .btn-ghost {
   height: 32px; padding: 0 14px; border-radius: var(--radius-control); cursor: pointer;
   background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary);
@@ -425,6 +445,19 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   #btn-random, #btn-logout { display: none; }
   #progress { top: calc(62px + env(safe-area-inset-top)); }
 
+  /* 游客提示条：手机端顶栏空间有限，改为停靠在底栏之上，避免遮挡搜索框 */
+  body.is-guest { --guest-bar-h: 31px; }
+  body.is-guest .guest-bar {
+    top: auto; left: 0; right: 0; bottom: calc(54px + env(safe-area-inset-bottom));
+    padding: 7px 16px; font-size: 11.5px; line-height: 17px;
+  }
+  body.is-guest .layout { padding-top: calc(var(--header-height) + env(safe-area-inset-top)); }
+  body.is-guest aside { top: calc(var(--header-height) + env(safe-area-inset-top)); }
+  body.is-guest #progress { top: calc(var(--header-height) + env(safe-area-inset-top)); }
+  body.is-guest #m-root { bottom: calc(54px + var(--guest-bar-h) + env(safe-area-inset-bottom)); }
+  body.is-guest .m-reader-shell .m-body,
+  body.is-guest .m-mepage .m-body { padding-bottom: calc(46px + env(safe-area-inset-bottom)); }
+
   /* ---- 布局 ---- */
   .layout { padding-top: calc(62px + env(safe-area-inset-top)); }
   main { display: none; }   /* 移动端内容改由 #m-root 承载 */
@@ -633,6 +666,11 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .m-mepage .m-it .ct { font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle); margin-left: auto; flex-shrink: 0; }
   .m-mepage .m-it.danger, .m-mepage .m-it.danger .ct { color: #D6403A; }
   .m-mepage .m-empty { padding: 8px 16px 16px; color: var(--text-subtle); font-size: 12.5px; }
+  .m-mepage .m-guest-tip {
+    margin: 0 16px 8px; padding: 11px 13px; border-radius: var(--radius-card);
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: 12.5px; line-height: 1.6; color: var(--text-secondary);
+  }
 
   /* ---- 阅读页移动形态：状态栏留白 + 标题栏（无标题） + 更多菜单 ---- */
   .reader { max-width: none; }
@@ -771,6 +809,8 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     <button class="btn-ghost" id="btn-random" aria-label="随机打开一篇" title="随机打开一篇">随机一篇</button>
   </div>
 </header>
+
+<div class="guest-bar" id="guest-bar" role="status">游客访问 · 当前展示的是示例内容，<a href="/login">登录</a>后可查看你的知识库</div>
 
 <div class="layout">
   <aside id="sidebar">
@@ -1415,13 +1455,14 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
   const html = articleHTML(doc);
 
   const dirLabel = card.dir || relPath.split('/').slice(0, -1).join('/');
+  // 游客只读：不渲染分享 / 编辑 / 删除，也不再请求分享状态
+  const canWrite = !mAuth.guest;
   main.innerHTML = `
     <div class="reader">
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
       <button class="reader-back" onclick="history.back()">← 返回</button>
-      <button class="btn-ghost" id="btn-share">分享文档</button>
-      <button class="btn-ghost" id="btn-revoke" hidden>取消分享</button>
-      ${doc.isMarkdown ? '<button class="btn-ghost" id="btn-edit">编辑</button><button class="btn-ghost" id="btn-delete">删除</button>' : ''}
+      ${canWrite ? '<button class="btn-ghost" id="btn-share">分享文档</button><button class="btn-ghost" id="btn-revoke" hidden>取消分享</button>' : ''}
+      ${doc.isMarkdown && canWrite ? '<button class="btn-ghost" id="btn-edit">编辑</button><button class="btn-ghost" id="btn-delete">删除</button>' : ''}
       <span id="share-status" role="status" style="font-size:13px"></span>
       </div>
       <div id="share-result" hidden style="margin:12px 0"><label for="share-link">分享链接（持有链接者可直接查看当前文档及图片）</label><input id="share-link" readonly style="width:100%;padding:10px;margin-top:6px"></div>
@@ -1431,6 +1472,15 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
       </div>
       <div class="article">${html}</div>
     </div>`;
+  if (!canWrite) {
+    document.title = (card.title || doc.title || relPath) + ' · Atlas';
+    document.documentElement.scrollTop = 0;
+    if (pendingDocHeading?.path === relPath) { AtlasReader.scrollToHeading(main, pendingDocHeading.heading); pendingDocHeading = null; }
+    main.querySelectorAll('a[href^="#doc="]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); const target = parseHash(a.getAttribute('href')); const heading = a.dataset.documentHeading; if (target.param === relPath && heading) { AtlasReader.scrollToHeading(main, heading); return; } pendingDocHeading = heading ? { path: target.param, heading } : null; setRoute(target.view, target.param); });
+    });
+    return;
+  }
   const shareEndpoint = '/api/share?path=' + encodeURIComponent(relPath);
   let shareUrl = null;
   const shareButton = $('#btn-share');
@@ -1567,8 +1617,6 @@ async function renderMobileDoc(relPath, epoch) {
     mEditAction = mDeleteAction = mShareAction = mRevokeAction = mCopyAction = null;
     return;
   }
-  $('#m-rm-edit').hidden = false;
-  $('#m-rm-del').hidden = false;
   $('#btn-m-share').disabled = $('#btn-m-more').disabled = false;
 
   const html = articleHTML(doc);
@@ -1589,6 +1637,12 @@ async function renderMobileDoc(relPath, epoch) {
     pendingDocHeading = null;
   }
   pushRecent({ ...card, relPath, title });
+
+  // 游客只读：不请求分享状态，也不绑定任何分享 / 编辑 / 删除动作
+  if (mAuth.guest) {
+    mEditAction = mDeleteAction = mShareAction = mRevokeAction = mCopyAction = null;
+    return;
+  }
 
   // 分享：与桌面端同一接口，状态回写卡片
   const shareEndpoint = '/api/share?path=' + encodeURIComponent(relPath);
@@ -2254,15 +2308,16 @@ function renderMe() {
   host.innerHTML = `
     <div class="m-grp">账户</div>
     <div class="m-profile">
-      <div class="av">${esc((mAuth.username || 'A').slice(0, 1).toUpperCase())}</div>
+      <div class="av">${esc((mAuth.username || (mAuth.guest ? '游' : 'A')).slice(0, 1).toUpperCase())}</div>
       <div style="flex:1;min-width:0">
-        <div class="nm">${esc(mAuth.username || '未登录')}</div>
+        <div class="nm">${esc(mAuth.guest ? '游客' : (mAuth.username || '未登录'))}</div>
         <div class="sub2">${esc(mAuth.sessionText)}</div>
       </div>
-      <button class="m-logout" data-act="logout" aria-label="退出登录">
+      <button class="m-logout" data-act="logout" aria-label="${mAuth.guest ? '退出游客模式' : '退出登录'}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2"/><path d="M10 12h10M17 9l3 3-3 3"/></svg>
       </button>
     </div>
+    ${mAuth.guest ? '<div class="m-guest-tip">当前为示例内容，仅供浏览。登录后可查看你的知识库，并使用编辑、删除与分享。</div>' : ''}
     <div class="m-grp">统计</div>
     <div class="m-grid3">
       <div class="m-stat"><b>${allCards.length}</b><span>笔记</span></div>
@@ -2281,27 +2336,44 @@ function renderMe() {
   });
   const logoutBtn = host.querySelector('[data-act="logout"]');
   if (logoutBtn) logoutBtn.onclick = async () => {
-    if (!confirm('确定退出登录？')) return;
+    if (!confirm(mAuth.guest ? '退出游客模式？' : '确定退出登录？')) return;
     await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     clearEditor();
     location.replace('/login');
   };
 }
-/* 登录态（读 /auth/status，含 username 与会话过期时间） */
-const mAuth = { username: null, expiresAt: null, sessionText: '' };
+/* 登录态（读 /auth/status，含 username、游客标记与会话过期时间） */
+const mAuth = { username: null, expiresAt: null, sessionText: '', guest: false };
 async function loadAuth() {
   try {
     const r = await fetch('/auth/status');
     const j = await r.json();
     mAuth.username = j.username;
     mAuth.expiresAt = j.expiresAt;
+    mAuth.guest = !!j.guest;
     if (!j.authenticated) mAuth.sessionText = '未登录';
+    else if (j.guest) mAuth.sessionText = '游客访问 · 只读示例内容';
     else {
       const left = Math.max(0, Math.floor(((j.expiresAt || 0) - Date.now()) / 60000));
       mAuth.sessionText = left > 90 ? `已登录 · 会话剩余 ${Math.floor(left / 60)} 小时` : `已登录 · 会话剩余 ${left} 分钟`;
     }
   } catch {
     mAuth.sessionText = '状态获取失败';
+  }
+  applyGuestUI();
+}
+
+/* 游客模式：服务端已拒绝全部写操作，这里同步收起写入口，避免给出可点的假按钮。
+   底栏用 .guest-hide 类而不是 hidden 属性：.m-tabbar .m-item 显式声明了 display:flex，
+   会盖掉 hidden 属性的默认 display:none。 */
+function applyGuestUI() {
+  if (!mAuth.guest) return;
+  document.body.classList.add('is-guest');
+  const logout = document.getElementById('btn-logout');
+  if (logout) logout.textContent = '退出游客';
+  // 移动端底栏「新增」与阅读页的分享 / 编辑 / 删除均为写操作，游客不可用
+  for (const sel of ['#m-tabbar .m-item[data-nav="create"]', '#m-rm-edit', '#m-rm-del', '#m-rm-copy', '#btn-m-share', '#btn-m-more']) {
+    document.querySelectorAll(sel).forEach(el => el.classList.add('guest-hide'));
   }
 }
 
@@ -2311,13 +2383,14 @@ async function loadAuth() {
   const directDoc = parseHash().view === 'doc';
   try {
     const data = Promise.all([loadCards(), loadTree()]);
+    // 登录态先于首屏渲染就绪：游客模式要据此收起写入口
+    await loadAuth();
     if (directDoc) renderView();
     await data;
     if ((directDoc && route.view === 'doc') || editState) renderSidebar();
     else renderView();
   }
   catch (error) { showViewError(error); }
-  if (isMobile()) loadAuth();
 })();
 </script>
 </body>

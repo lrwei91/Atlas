@@ -171,7 +171,74 @@ const { spawn } = require('node:child_process');
     assert.equal((await post('/auth/login', credentials)).status, 200);
     for (let i = 0; i < 10; i++) await post('/auth/login', { ...credentials, password: 'wrong' });
     assert.equal((await post('/auth/login', credentials)).status, 429);
-    console.log('PASS: login, setup, session, logout, throttling, private files, traversal, live data, share scope/revocation/persistence, image/video rendering, video byte ranges');
+
+    /* ---- 游客模式：免凭据进入，只读，且与真实主库完全隔离 ---- */
+    assert.equal((await post('/auth/guest', {}, '', 'https://attacker.example')).status, 403);
+    assert.equal((await fetch(base + '/auth/guest', { method: 'POST', headers: { 'Content-Type': 'text/plain', Origin: 'https://note.lrwei91.online' }, body: '{}' })).status, 403);
+    const guest = await post('/auth/guest', {});
+    assert.equal(guest.status, 200);
+    const guestBody = await guest.json();
+    assert.equal(guestBody.guest, true);
+    assert.ok(guestBody.expiresAt > Date.now());
+    const guestCookie = guest.headers.get('set-cookie').split(';')[0];
+    assert.match(guest.headers.get('set-cookie'), /HttpOnly; SameSite=Strict.*; Secure/);
+    assert.match(guest.headers.get('set-cookie'), /Max-Age=7200/);
+    const gGet = route => fetch(base + route, { headers: { Cookie: guestCookie } });
+    const gPost = (route, body = {}) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.online', Cookie: guestCookie }, body: JSON.stringify(body) });
+    const guestStatus = await (await fetch(base + '/auth/status', { headers: { Cookie: guestCookie } })).json();
+    assert.equal(guestStatus.authenticated, true);
+    assert.equal(guestStatus.guest, true);
+    assert.equal(guestStatus.username, null);           // 不泄露管理员账号名
+    const adminStatus = await (await fetch(base + '/auth/status', { headers: { Cookie: cookie } })).json();
+    assert.equal(adminStatus.guest, false);
+    // 工作台页面与静态资源正常
+    assert.equal((await gGet('/')).status, 200);
+    for (const asset of ['/reader.js', '/atlas-ui.css', '/page-touch.js', '/vendor/marked.min.js']) assert.equal((await gGet(asset)).status, 200);
+    // 只读示例数据：目录、卡片、原文、检索
+    const guestTree = await (await gGet('/api/tree')).json();
+    assert.ok(Array.isArray(guestTree.children) && guestTree.children.length > 0);
+    const guestCards = (await (await gGet('/api/cards')).json()).cards;
+    assert.ok(guestCards.length >= 5);
+    assert.ok(guestCards.every(c => c.isMarkdown && c.isShared === false));
+    const sample = guestCards[0];
+    const sampleDoc = await (await gGet('/api/doc?path=' + encodeURIComponent(sample.relPath))).json();
+    assert.equal(sampleDoc.relPath, sample.relPath);
+    assert.match(sampleDoc.content, /^#/);
+    assert.match(sampleDoc.version, /^[a-f0-9]{64}$/);
+    assert.ok(Object.keys(sampleDoc.links).length > 0, '示例文档应包含可跳转的双链');
+    const samplePaths = new Set(guestCards.map(c => c.relPath));
+    const hits = await (await gGet('/api/search?q=' + encodeURIComponent('风控'))).json();
+    assert.ok(hits.results.length > 0);
+    assert.ok(hits.results.every(r => samplePaths.has(r.relPath)), '检索结果只能来自示例数据集');
+    // 真实主库内容对游客完全不可见
+    for (const route of ['/api/doc?path=test.md', '/api/doc?path=recent.md', '/files/notes/test.md', '/files/resources/' + encodeURIComponent(imageName)]) {
+      assert.equal((await gGet(route)).status, 404, route);
+    }
+    for (const route of ['/files/%2e%2e%2f%2e%2e%2fserver.js', '/files/demo/%2e%2e%2f%2e%2e%2fserver.js', '/files/demo/..%2f..%2fserver.js']) {
+      assert.equal((await gGet(route)).status, 404, route);
+    }
+    // 示例配图可访问，且只有白名单内的文件
+    const coverCard = guestCards.find(c => c.cover);
+    assert.ok(coverCard && coverCard.cover.startsWith('/files/demo/'), '示例卡片应带封面');
+    assert.equal((await gGet(coverCard.cover)).status, 200);
+    assert.equal((await gGet('/files/demo/index.html')).status, 404);
+    assert.equal((await gGet('/files/demo/01-trading.jpg')).status, 200);
+    // 写操作全部拒绝
+    const demoWriteTarget = '/api/doc?path=' + encodeURIComponent(sample.relPath);
+    for (const route of ['/api/doc?path=test.md', demoWriteTarget, '/api/share?path=test.md']) {
+      assert.equal((await gPost(route)).status, 403, route);
+      assert.equal((await fetch(base + route, { method: 'DELETE', headers: { Cookie: guestCookie, Origin: 'https://note.lrwei91.online' } })).status, 403, route);
+      assert.equal((await fetch(base + route, { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.online', Cookie: guestCookie }, body: '{"content":"x","version":"' + '0'.repeat(64) + '"}' })).status, 403, route);
+    }
+    // 写操作被拒后主库文件未改动
+    assert.equal(fs.readFileSync(path.join(vault, 'notes', 'test.md'), 'utf8').includes('Fresh share update'), true);
+    // 游客退出后立即失效
+    assert.equal((await post('/auth/logout', {}, guestCookie)).status, 200);
+    assert.equal((await gGet('/api/cards')).status, 401);
+    // 游客限速独立于登录限速
+    for (let i = 0; i < 19; i++) await post('/auth/guest', {});
+    assert.equal((await post('/auth/guest', {})).status, 429);
+    console.log('PASS: login, setup, session, logout, throttling, private files, traversal, live data, share scope/revocation/persistence, image/video rendering, video byte ranges, guest read-only isolation');
   } finally {
     child.kill();
     await new Promise(resolve => child.once('exit', resolve));

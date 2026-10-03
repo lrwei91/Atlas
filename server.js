@@ -18,11 +18,13 @@ const fs = require('fs');
 const path = require('path');
 const auth = require('./auth');
 const shares = require('./shares');
+const demo = require('./demo-vault');
 const readBody = require('./request-body');
 const versionOf = require('./document-version');
 const reader = require('./public/reader');
 const responses = require('./response-cache');
 const imageSize = require('./image-size');
+const textCount = require('./text-count');
 
 const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/com~apple~CloudDocs/知识库');
 const NOTES = path.join(VAULT, 'notes');
@@ -113,10 +115,10 @@ function walk(dir, cb) {
 
 function relToNotes(full) { return path.relative(NOTES, full).split(path.sep).join('/'); }
 
-/* 卡片封面：优先读取 frontmatter.cover，兼容旧内嵌封面，再取正文首张本地图片。
-   命中本地文件时返回可访问的 /files/ 路径，避免前端二次解析。 */
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
-function coverFrom(content, rel) {
+/* 卡片封面：正文首张有效图片优先；正文完全没有图片时才使用元数据封面。 */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+const INLINE_IMAGE = /^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+function coverFrom(content, rel, resolveImage = documents.createImageResolver(), entry = {}) {
   const source = reader.body(content);
   const frontmatter = content.slice(0, content.length - source.length);
   const coverField = frontmatter.match(/^cover:[ \t]*(.*)$/m);
@@ -133,68 +135,35 @@ function coverFrom(content, rel) {
   }
   // 支持 cover 字段写成 [[路径]] 或 [[路径|别名]]，与正文双链语法一致
   explicitCover = explicitCover.replace(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/, '$1');
-  if (/^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(explicitCover)) return explicitCover;
   const embeddedCover = frontmatter.match(/!\[[^\]\r\n]*\]\((data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2})\)/i);
-  const patterns = [
-    /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // 双链内嵌媒体
-    /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,       // Markdown 图片
-    /<img[^>]+src=["']([^"']+)["']/gi,                  // HTML 图片
-  ];
-  const candidates = explicitCover && !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(explicitCover) ? [explicitCover] : [];
-  const bodyCandidates = [];
-  for (const re of patterns) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(source))) {
-      const raw = m[1].split(/[?#]/)[0].trim();
-      if (raw && !/^(https?:|data:|file:)/i.test(raw)) bodyCandidates.push(raw);
-      if (bodyCandidates.length >= 8) break;
-    }
-    if (bodyCandidates.length) break;
-  }
-  if (embeddedCover) candidates.push(embeddedCover[1]);
-  candidates.push(...bodyCandidates);
+  const bodyCandidates = entry.coverSources || (entry.coverSources = documents.coverSources(content));
+  // Broken original-image references must not silently become generated covers.
+  const candidates = (bodyCandidates.length ? bodyCandidates : [explicitCover, embeddedCover?.[1]]).filter(Boolean);
   for (const raw of candidates) {
-    if (raw.startsWith('data:')) return raw;
-    let target = raw;
-    try { target = decodeURIComponent(target); } catch {}
-    target = target.replace(/^\/files\//, '').replace(/^\.\//, '');
-    const bases = [
-      path.posix.join('notes', path.posix.dirname(rel), target),
-      target.replace(/^\//, ''),
-      'resources/' + path.posix.basename(target),
-    ];
-    for (const candidate of bases) {
-      if (!IMAGE_EXT.test(candidate)) continue;
-      const abs = safeResolve(VAULT, candidate);
-      if (abs && statOrNull(abs)?.isFile()) {
-        // safeResolve 返回 realpath，VAULT 未必是；两侧都取realpath 再求相对路径，
-        // 否则软链目录（如 /var → /private/var）会算出带 ../../ 的越界路径
-        let relToVault;
-        try { relToVault = path.relative(fs.realpathSync(VAULT), abs); }
-        catch { relToVault = path.relative(VAULT, abs); }
-        const normalized = relToVault.split(path.sep).join('/');
-        if (normalized.startsWith('..')) continue;   // 越界则不作为封面
-        return '/files/' + normalized.split('/').map(encodeURIComponent).join('/');
-      }
-    }
+    if (INLINE_IMAGE.test(raw)) return raw;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw) && !/^file:\/\//i.test(raw)) continue;
+    const target = resolveImage(raw, rel);
+    if (target && IMAGE_EXT.test(target)) return '/files/' + target.split('/').map(encodeURIComponent).join('/');
   }
   return null;
 }
 
-function cardDetails(entry, rel) {
+function cardDetails(entry, rel, resolveImage) {
   if (!entry.card) {
     const body = reader.body(entry.content);
-    const embedded = coverFrom(entry.content, rel);
     entry.card = {
       title: ((body.match(/^#\s+(.+)$/m) || [])[1] || path.basename(rel, '.md')).trim().slice(0, 80),
-      excerpt: excerptFrom(entry.content), chars: body.length,
-      embeddedCover: embedded?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : null,
-      ...(embedded?.startsWith('data:') ? imageSize(Buffer.from(embedded.split(',')[1], 'base64')) : {}),
+      excerpt: excerptFrom(entry.content), chars: textCount(entry.content),
     };
   }
-  const { embeddedCover, ...details } = entry.card;
-  return { ...details, cover: embeddedCover || coverFrom(entry.content, rel) };
+  // Resolve against live files, so deletion/addition cannot leave a cached fallback in charge.
+  const cover = coverFrom(entry.content, rel, resolveImage, entry);
+  return {
+    ...entry.card,
+    cover: cover?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : cover,
+    ...(cover?.startsWith('data:') ? imageSize(Buffer.from(cover.split(',')[1], 'base64')) : {}),
+  };
 }
 
 /* ---------- API 实现 ---------- */
@@ -221,6 +190,7 @@ function buildTree() {
 }
 
 function buildCards(dirFilter) {
+  const resolveImage = documents.createImageResolver();
   const cards = [];
   const liveFiles = new Set();
   walk(NOTES, (full) => {
@@ -242,7 +212,7 @@ function buildCards(dirFilter) {
       mtime: st.mtimeMs,
       size: st.size,
       dir: path.dirname(rel) === '.' ? '' : path.dirname(rel),
-      ...cardDetails(entry, rel),
+      ...cardDetails(entry, rel, resolveImage),
     });
   });
   noteCache.prune(liveFiles);
@@ -382,12 +352,42 @@ const server = http.createServer(async (req, res) => {
       else { res.writeHead(302, { Location: '/login', 'Cache-Control': 'no-store' }); res.end(); }
       return;
     }
+    /* 游客会话：只读，且只能看到内置示例内容。
+       独立于主库分支，写操作与主库附件一律拒绝，不做逐个按钮的隐藏式防护。 */
+    if (auth.session(req).guest) {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      if (req.method !== 'GET' && req.method !== 'HEAD') { sendJSON(res, 403, { error: '游客访问为只读，不能修改内容' }); return; }
+      if (p === '/' || p === '/index.html') { sendFile(req, res, path.join(PUBLIC_DIR, 'index.html')); return; }
+      if (p === '/api/tree') { responses.json(res, 200, demo.tree(), { validate: true, key: 'demo-tree' }); return; }
+      if (p === '/api/cards') {
+        const cards = demo.cards(u.searchParams.get('dir') || '');
+        responses.json(res, 200, { cards }, { validate: true, key: 'demo-cards-' + (u.searchParams.get('dir') || '') });
+        return;
+      }
+      if (p === '/api/doc') {
+        const doc = demo.read(u.searchParams.get('path') || '');
+        if (!doc) { sendJSON(res, 404, { error: 'not found' }); return; }
+        sendDocument(req, res, doc); return;
+      }
+      if (p === '/api/search') {
+        const q = (u.searchParams.get('q') || '').trim();
+        sendJSON(res, 200, { query: q, results: demo.search(q) }); return;
+      }
+      // 示例配图：只允许 public/covers/ 白名单内的文件名
+      if (p.startsWith('/files/')) {
+        const name = p.slice('/files/'.length);
+        const allowed = demo.image(decodeURIComponent(name));
+        if (!allowed) { sendJSON(res, 404, { error: '游客模式下不可访问该文件' }); return; }
+        sendFile(req, res, path.join(PUBLIC_DIR, 'covers', allowed)); return;
+      }
+      res.writeHead(404); res.end('Not found'); return;
+    }
     if (p === '/api/cover' && ['GET', 'HEAD'].includes(req.method)) {
       const rel = u.searchParams.get('path') || '', full = safeResolve(NOTES, rel);
       const st = full && statOrNull(full);
       if (!st?.isFile() || path.extname(full).toLowerCase() !== '.md') { sendJSON(res, 404, { error: '封面不存在' }); return; }
       const entry = noteCache.read(full, st);
-      const source = coverFrom(entry.content, rel);
+      const source = coverFrom(entry.content, rel, documents.createImageResolver(), entry);
       const match = source?.match(/^data:(image\/(?:png|jpeg|gif|webp|avif|bmp));base64,(.+)$/);
       if (!match) { sendJSON(res, 404, { error: '封面不存在' }); return; }
       const headers = { 'Content-Type': match[1], 'Cache-Control': 'private, no-cache', ETag: responses.etag(st) };

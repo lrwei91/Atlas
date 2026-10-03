@@ -1,0 +1,12 @@
+'use strict';
+const assert = require('node:assert/strict');
+const count = require('./text-count');
+const payload = 'A'.repeat(1024 * 1024);
+assert.equal(count(`---\ncover: data:image/png;base64,${payload}\n---\n# 标题\n正文。\n![](data:image/png;base64,${payload})`), 5);
+assert.equal(count('![说明](image.png)\n![[附件.png|300]]\n<img src="other.jpg" alt="配图">'), 0);
+assert.equal(count('[链接文字](https://example.com/very-long-url)\n**粗体**\n> 引用'), 8);
+assert.equal(count('![配图][image]\n\n[image]: resources/photo.png\n\n<!-- 隐藏文字 -->\n<script>隐藏脚本</script>\n<style>隐藏样式</style>'), 0);
+assert.equal(count('# A B\n\n```js\nconst x = 1;\n```\n\n| 项目 | 值 |\n| --- | --- |\n| 苹果 | 2 |'), 17);
+assert.equal(count('中文 😀\n&amp;'), 4);
+assert.equal(count(''), 0);
+console.log('PASS: visible text counts exclude metadata, image payloads, URLs, markup and whitespace; retain code, tables and Unicode');

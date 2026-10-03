@@ -11,6 +11,10 @@ const adminFile = path.join(stateDir, 'admin.json');
 const tokenFile = path.join(stateDir, 'setup-token');
 const sessions = new Map();
 const attempts = new Map();
+const guestAttempts = new Map();
+const GUEST_TTL = 2 * 60 * 60 * 1000;      // 游客会话 2 小时
+const ADMIN_TTL = 12 * 60 * 60 * 1000;     // 管理员会话 12 小时
+const MAX_GUEST_SESSIONS = 64;             // 防止游客会话无限堆积占内存
 let creating = false;
 if (!fs.existsSync(adminFile) && !fs.existsSync(tokenFile)) {
   fs.writeFileSync(tokenFile, crypto.randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' });
@@ -44,12 +48,14 @@ async function handle(req, res, pathname) {
     json(res, 200, {
       setupRequired: !fs.existsSync(adminFile),
       authenticated: !!current,
-      username,
+      guest: !!current?.guest,
+      // 游客不暴露管理员账号名
+      username: current?.guest ? null : username,
       expiresAt: current ? current.expires : null,
       publicUrl: process.env.ATLAS_PUBLIC_URL || null,
     }); return true;
   }
-  if (!['/auth/setup', '/auth/login', '/auth/logout'].includes(pathname)) return false;
+  if (!['/auth/setup', '/auth/login', '/auth/logout', '/auth/guest'].includes(pathname)) return false;
   if (req.method !== 'POST') { json(res, 405, { error: '请使用 POST' }); return true; }
   const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;
   if (req.headers.origin !== expected || !(req.headers['content-type'] || '').startsWith('application/json')) {
@@ -58,6 +64,23 @@ async function handle(req, res, pathname) {
   if (pathname === '/auth/logout') {
     const current = session(req); if (current) sessions.delete(current.token);
     res.setHeader('Set-Cookie', cookie('', 0)); json(res, 200, { ok: true }); return true;
+  }
+  if (pathname === '/auth/guest') {
+    // 游客不需要凭据，但仍按来源校验与独立限速，避免被脚本无限造会话
+    const now = Date.now();
+    const guestKey = req.socket.remoteAddress;
+    const recent = (guestAttempts.get(guestKey) || []).filter(t => now - t < 15 * 60 * 1000);
+    if (recent.length >= 20) { json(res, 429, { error: '游客访问过于频繁，请 15 分钟后再试' }); return true; }
+    recent.push(now); guestAttempts.set(guestKey, recent);
+    try { await body(req); } catch {}
+    for (const [key, value] of sessions) if (value.expires < now) sessions.delete(key);
+    // 超出上限时丢弃最早的游客会话，保证管理员会话不被挤掉
+    const guests = [...sessions].filter(([, value]) => value.guest);
+    for (const [key] of guests.slice(0, Math.max(0, guests.length - MAX_GUEST_SESSIONS + 1))) sessions.delete(key);
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { expires: now + GUEST_TTL, guest: true });
+    res.setHeader('Set-Cookie', cookie(token, GUEST_TTL / 1000));
+    json(res, 200, { ok: true, guest: true, expiresAt: now + GUEST_TTL }); return true;
   }
   // Global limiter cannot be bypassed by forged forwarded IP headers.
   const key = req.socket.remoteAddress;
@@ -95,8 +118,8 @@ async function handle(req, res, pathname) {
   attempts.delete(key);
   for (const [key, value] of sessions) if (value.expires < now) sessions.delete(key);
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { expires: now + 12 * 60 * 60 * 1000 });
-  res.setHeader('Set-Cookie', cookie(token, 43200));
+  sessions.set(token, { expires: now + ADMIN_TTL });
+  res.setHeader('Set-Cookie', cookie(token, ADMIN_TTL / 1000));
   json(res, 200, { ok: true }); return true;
 }
 module.exports = { handle, session };
