@@ -61,7 +61,7 @@ async function serverTests() {
     assert.equal((await put({ content: 'Missing version' })).status, 428);
     assert.equal((await put({ content: 'Stale save', version: doc.version })).status, 409);
     const current = await getDoc();
-    fs.writeFileSync(path.join(vault, 'notes', 'test.md'), '# Obsidian\nNew external edit');
+    fs.writeFileSync(path.join(vault, 'notes', 'test.md'), '# 知识库\nNew external edit');
     assert.equal((await put({ content: 'Browser stale draft', version: current.version })).status, 409);
     assert.match((await getDoc()).content, /New external edit/);
     const both = await getDoc();

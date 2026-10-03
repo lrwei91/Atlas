@@ -60,7 +60,7 @@ const { performance } = require('node:perf_hooks');
     console.log('Median local HTTP ms (502 notes, 500 images):', JSON.stringify(medians));
     if (inlineCover) console.log('Cards JSON bytes (260 embedded covers):', Buffer.byteLength(JSON.stringify(await get('/api/cards'))));
 
-    // Repeated requests must still observe Obsidian edits and atomic replacements.
+    // Repeated requests must still observe external edits and atomic replacements.
     const target = path.join(notes, 'note-0.md');
     fs.writeFileSync(target, '# Changed\nunique-fresh-content');
     assert.equal((await get('/api/search?q=unique-fresh-content')).results.length, 1);

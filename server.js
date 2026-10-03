@@ -1,6 +1,6 @@
 /*
  * Atlas 知识库工作台 — 本地服务器（读为主，Markdown 支持在线编辑与安全删除）
- * 数据源：Obsidian 主库（iCloud Drive 同步目录），零依赖 Node.js
+ * 数据源：本机知识库主目录（iCloud Drive 同步目录），零依赖 Node.js
  * API:
  *   GET  /                  前端页面
  *   GET  /api/tree          分类目录树（notes/）
@@ -90,7 +90,6 @@ function excerptFrom(content) {
     if (inFence) continue;
     if (!line || line.startsWith('#') || line.startsWith('---')) continue;
     const text = line
-      .replace(/!?\[\[[^\]]*\]\]/g, (m) => (m.startsWith('!') ? '[图片]' : m.replace(/[[\]]/g, '').split('|').pop()))
       .replace(/[*_`>~\[\]]/g, '')
       .replace(/^[-+*]\s+/, '');
     if (text.length > 8) {
@@ -132,11 +131,12 @@ function coverFrom(content, rel) {
   } else {
     explicitCover = explicitCover.replace(/\s+#.*$/, '').trim();
   }
+  // 支持 cover 字段写成 [[路径]] 或 [[路径|别名]]，与正文双链语法一致
   explicitCover = explicitCover.replace(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/, '$1');
   if (/^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(explicitCover)) return explicitCover;
   const embeddedCover = frontmatter.match(/!\[[^\]\r\n]*\]\((data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2})\)/i);
   const patterns = [
-    /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // Obsidian 内嵌图片
+    /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // 双链内嵌媒体
     /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,       // Markdown 图片
     /<img[^>]+src=["']([^"']+)["']/gi,                  // HTML 图片
   ];
@@ -424,7 +424,7 @@ const server = http.createServer(async (req, res) => {
         const parentRel = path.posix.dirname(rel);
         const parentAbs = parentRel === '.' ? null : safeResolve(NOTES, parentRel);
         if (!parentRel || parentRel === '.' || !parentAbs || !statOrNull(parentAbs)?.isDirectory()) {
-          sendJSON(res, 404, { error: '目标目录不存在，请先在 Obsidian 中创建' }); return;
+          sendJSON(res, 404, { error: '目标目录不存在，请先在知识库中创建' }); return;
         }
         const abs = safeResolveForCreate(NOTES, rel);
         if (!abs) { sendJSON(res, 400, { error: '路径不合法' }); return; }
@@ -476,7 +476,7 @@ const server = http.createServer(async (req, res) => {
           const current = safeResolve(NOTES, rel);
           if (current !== abs || versionOf(fs.readFileSync(abs, 'utf8')) !== payload.version) {
             fs.unlinkSync(tmp);
-            sendJSON(res, 409, { error: '文档已被其他窗口或 Obsidian 修改，草稿已保留。请复制草稿，重新打开文档后合并修改。' }); return;
+            sendJSON(res, 409, { error: '文档已被其他窗口或外部程序修改，草稿已保留。请复制草稿，重新打开文档后合并修改。' }); return;
           }
           fs.renameSync(tmp, abs);
         } catch {
