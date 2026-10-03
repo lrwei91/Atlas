@@ -12,7 +12,7 @@ npm start
 
 也可双击 `start.command`：脚本检查服务就绪后，根据 `/auth/status` 返回的运行配置打开本机或公网地址。已有服务不会被脚本关闭；本次由脚本启动的服务随脚本退出而停止。
 
-环境变量：`PORT`（默认 4317）、`ATLAS_VAULT`（默认本机主库路径）、`ATLAS_STATE_DIR`（默认项目 `.local`）、`ATLAS_PUBLIC_URL`（公网时必须设为 `https://note.lrwei91.com`）。不公开 `.local`，不将 `public/` 直接挂到静态托管。
+环境变量：`PORT`（默认 4317）、`ATLAS_VAULT`（默认本机主库路径）、`ATLAS_STATE_DIR`（默认项目 `.local`）、`ATLAS_PUBLIC_URL`（公网时必须设为 `https://note.lrwei91.online`，与隧道 ingress 保持一致）。不公开 `.local`，不将 `public/` 直接挂到静态托管。
 
 ## Cloudflare 部署（当前使用）
 
@@ -40,6 +40,10 @@ python3 deploy/install-cloudflare.py
 DNS 绑定命令务必使用 Atlas 自身的 `--config` 和明确的隧道 UUID；cloudflared 的默认配置可能属于本机其他服务。不要修改其他域名或隧道。
 
 公网环境必须配置 `ATLAS_PUBLIC_URL=https://note.lrwei91.online`，使登录请求校验正确来源，Cookie 使用 Secure、HttpOnly 和 SameSite=Strict；HTTP 请求会跳转到 HTTPS。公网域名启用后请从域名登录，本机 HTTP 登录不作为公网登录入口。
+
+## 应用图标与添加到主屏幕
+
+`public/` 提供 `favicon.svg` 与 `apple-touch-icon-{180,192,512}.png`（`#FFD84D` 底 + 三条横杠），工作台、登录页和分享页均在服务端渲染的首屏标记中声明。图标由 iOS 在页面会话之外抓取、不携带登录会话，因此这四个路径在 `server.js` 中列入免登录公开清单，未登录时直接返回文件本身；其余静态资源与全部业务接口仍需登录。修改图标或免登录清单后需重启服务进程才生效，且必须从主屏删除旧图标再重新添加才能看到新结果。
 
 先前准备的 `deploy/Caddyfile` 与 `deploy/install-tunnel.py` 为备用云服务器方案，当前没有启用。
 

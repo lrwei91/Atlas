@@ -355,6 +355,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (await auth.handle(req, res, p)) return;
     if (p === '/login') { sendFile(req, res, path.join(PUBLIC_DIR, 'login.html')); return; }
+    // 图标必须免登录：iOS「添加到主屏幕」会在无会话 / 分享页场景下抓取 apple-touch-icon，
+    // 若被 302 到 /login，客户端拿到 HTML 而非图片，图标就会缺失。
+    if (['/favicon.svg', '/apple-touch-icon-180.png', '/apple-touch-icon-192.png', '/apple-touch-icon-512.png'].includes(p) && req.method === 'GET') {
+      sendFile(req, res, path.join(PUBLIC_DIR, p.slice(1))); return;
+    }
     if (['/reader.js', '/page-touch.js', '/atlas-ui.css', '/vendor/marked.min.js', '/vendor/highlight.min.js', '/vendor/hl-theme.css'].includes(p) && req.method === 'GET') {
       sendFile(req, res, path.join(PUBLIC_DIR, p.slice(1))); return;
     }
