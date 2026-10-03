@@ -72,10 +72,21 @@ async function serverTests() {
     // Frontmatter covers feed the existing mobile card field without leaking into excerpts.
     const inlineCover = 'data:image/jpeg;base64,/9j/2Q==';
     fs.writeFileSync(path.join(vault, 'resources', 'body.png'), Buffer.from('image'));
+    fs.mkdirSync(path.join(vault, 'resources', 'fallback-covers'));
+    fs.writeFileSync(path.join(vault, 'resources', 'fallback-covers', '工具 封面.png'), Buffer.from('fallback'));
     const coverNotes = {
+      'cover-field.md': '---\ncover: "resources/fallback-covers/工具 封面.png"\n---\n# 字段封面\n这是应当显示的正文摘要。\n![](resources/body.png)',
+      'cover-field-data.md': `---\ncover: '${inlineCover}'\n---\n# AI cover`,
+      'cover-field-wiki.md': '---\ncover: "[[resources/body.png]]"\n---\n# Wiki',
+      'cover-field-relative.md': '---\ncover: ../resources/body.png # cover\n---\n# Relative',
+      'cover-field-unsafe.md': '---\ncover: "../../outside.png"\n---\n# Unsafe\n![](resources/body.png)',
+      'cover-field-missing.md': `---\ncover: resources/missing.png\n![封面](${inlineCover})\n---\n# Legacy`,
+      'cover-field-priority.md': `---\ncover: resources/body.png\n![封面](${inlineCover})\n---\n# Priority`,
+      'cover-field-body.md': '# Body\ncover: resources/body.png',
       '00-notes-index.md': '# Notes Index\nIndex remains readable.',
       'cover.md': `---\n![封面](${inlineCover})\n---\n# 封面测试\n这是应当显示的正文摘要。\n![](resources/body.png)`,
       'cover-crlf.md': `\uFEFF---\r\n![封面](${inlineCover})\r\n...\r\n# Cover`,
+      'cover-tall.md': '---\n![封面](data:image/jpeg;base64,' + Buffer.from('ffd8ffc000070804b00258ffd9', 'hex').toString('base64') + ')\n---\n# Tall',
       'cover-body.md': '# Body\n![](resources/body.png)\n---\nLater\n---',
       'cover-unsafe.md': '---\n![封面](data:text/html;base64,AAAA)\n---\n# Unsafe\n![](resources/body.png)',
       'cover-percent.md': '# Percent\n![](bad%.png)',
@@ -83,6 +94,18 @@ async function serverTests() {
     for (const [name, text] of Object.entries(coverNotes)) fs.writeFileSync(path.join(vault, 'notes', name), text);
     const coverCards = (await (await fetch(base + '/api/cards', { headers: headers() })).json()).cards;
     const coverCard = name => coverCards.find(card => card.relPath === name);
+    assert.equal(coverCard('cover-field.md').cover, '/files/resources/fallback-covers/' + encodeURIComponent('工具 封面.png'));
+    assert.equal(coverCard('cover-field.md').excerpt, '这是应当显示的正文摘要。');
+    assert.equal(require('./public/reader').prepare(coverNotes['cover-field.md']).includes('fallback-covers'), false);
+    const fieldImage = await fetch(base + coverCard('cover-field.md').cover, { headers: headers() });
+    assert.equal(fieldImage.status, 200);
+    assert.equal(await fieldImage.text(), 'fallback');
+    assert.equal((await fetch(base + coverCard('cover-field.md').cover)).status, 401);
+    assert.equal(coverCard('cover-field-data.md').cover, '/api/cover?path=cover-field-data.md');
+    assert.equal((await fetch(base + coverCard('cover-field-data.md').cover, { headers: headers() })).headers.get('content-type'), 'image/jpeg');
+    for (const name of ['cover-field-wiki.md', 'cover-field-relative.md', 'cover-field-unsafe.md', 'cover-field-priority.md']) assert.equal(coverCard(name).cover, '/files/resources/body.png');
+    assert.equal(coverCard('cover-field-missing.md').cover, '/api/cover?path=cover-field-missing.md');
+    assert.equal(coverCard('cover-field-body.md').cover, null);
     assert.equal(coverCard('00-notes-index.md'), undefined);
     const indexDoc = await (await fetch(base + '/api/doc?path=00-notes-index.md', { headers: headers() })).json();
     assert.match(indexDoc.content, /Notes Index/);
@@ -90,6 +113,8 @@ async function serverTests() {
     assert.equal(coverCard('cover.md').excerpt, '这是应当显示的正文摘要。');
     assert.equal(coverCard('cover.md').chars, require('./public/reader').body(coverNotes['cover.md']).length);
     assert.equal(coverCard('cover-crlf.md').cover, '/api/cover?path=cover-crlf.md');
+    assert.equal(coverCard('cover-tall.md').coverWidth, 600);
+    assert.equal(coverCard('cover-tall.md').coverHeight, 1200);
     const image = await fetch(base + coverCard('cover.md').cover, { headers: headers() });
     assert.equal(image.headers.get('content-type'), 'image/jpeg');
     assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from('/9j/2Q==', 'base64'));
@@ -325,8 +350,12 @@ async function mobileFrontendTests() {
     w.eval(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
     await waitFor(() => $('#m-scroll .card'));
     $('#btn-nav').click(); assert.equal($('#m-mask').classList.contains('on'), true);
-    // 侧栏由遮罩或向左滑动关闭。
-    assert.equal($('#btn-nav-close'), null);
+    // 侧栏支持明确关闭按钮、遮罩及向左滑动，关闭按钮恢复触发器焦点。
+    assert.equal(w.document.activeElement, $('#btn-nav-close'));
+    $('#btn-nav-close').click();
+    assert.equal($('#sidebar').classList.contains('is-open'), false);
+    assert.equal(w.document.activeElement, $('#btn-nav'));
+    $('#btn-nav').click();
     $('#m-mask').click(); assert.equal($('#m-mask').classList.contains('on'), false);
     $('#btn-nav').click();
     touch($('#sidebar'), 'touchstart', 200);
@@ -385,6 +414,12 @@ async function mobileFrontendTests() {
     await pause(220); assert.equal(w.parseHash().view, 'dir');
     assert.equal($('#m-scroll').scrollTop, 220);
     $('#m-scroll .card').click(); await pause(20);
+    $('#btn-m-more').click();
+    assert.equal($('#btn-m-more').getAttribute('aria-expanded'), 'true');
+    assert.equal(w.document.activeElement, $('#m-rm-edit'));
+    w.forceCloseRmenu();
+    assert.equal(w.document.activeElement, $('#btn-m-more'));
+    assert.equal($('#btn-m-more').getAttribute('aria-expanded'), 'false');
     $('#btn-m-more').click(); $('#m-rm-del').click();
     assert.equal($('#m-rmenu').classList.contains('on'), true);
     assert.equal($('#m-rm-del').classList.contains('armed'), true);
@@ -422,10 +457,10 @@ async function mobileFrontendTests() {
     assert.match($('#m-sub').textContent, /0 篇命中/);
     assert.equal($('#m-chips').style.display, 'none');
     assert.match($('#m-scroll').textContent, /没有找到/);
-    // 顶栏中间品牌、侧栏无关闭按钮与品牌区
+    // 顶栏中间品牌；分类抽屉保留明确关闭，不重复显示品牌区
     assert.equal($('#m-brand').textContent, 'Atlas');
     assert.equal($('.m-drawer-brand'), null);
-    assert.equal($('#btn-nav-close'), null);
+    assert.equal($('#btn-nav-close').getAttribute('aria-label'), '关闭分类');
     // 详情页：顶栏无标题，分享按钮双状态，更多菜单不含取消分享
     assert.equal($('.m-reader-shell .rbar .t'), null);
     assert.equal($('#m-rm-revoke'), null);
@@ -447,6 +482,27 @@ async function mobileFrontendTests() {
     w.layoutMasonry(grid, masonryCards);
     assert.equal(grid.children[0].children[0], masonryCards[0]);
     assert.equal(grid.children[1].children[0], masonryCards[1], '第二张应进右列');
+    const mutations = [];
+    const observer = new w.MutationObserver(records => mutations.push(...records));
+    observer.observe(grid, { childList: true, subtree: true });
+    w.layoutMasonry(grid, masonryCards); await pause(10);
+    assert.equal(mutations.length, 0, 'unchanged layout must not reinsert cards or restart images/animations');
+    let layouts = 0;
+    const originalLayout = w.layoutMasonry;
+    w.layoutMasonry = (...args) => { layouts++; return originalLayout(...args); };
+    for (let i = 0; i < 20; i++) w.scheduleMasonry(grid);
+    await pause(30); assert.equal(layouts, 1, 'image bursts must share one pending frame');
+    assert.equal(mutations.length, 0);
+    layouts = 0;
+    w.dispatchEvent(new w.Event('resize')); await pause(30);
+    assert.equal(layouts, 0, 'height-only viewport changes must not rearrange masonry');
+    observer.disconnect(); w.layoutMasonry = originalLayout;
+    grid.style.setProperty('--masonry-columns', '1');
+    w.layoutMasonry(grid, masonryCards);
+    assert.equal(grid.children[0].children.length, masonryCards.length);
+    masonryCards.forEach((card, i) => assert.equal(grid.children[0].children[i], card, 'narrow single column preserves original list order'));
+    assert.equal(grid.children[1].children.length, 0);
+    grid.style.setProperty('--masonry-columns', '2'); w.layoutMasonry(grid, masonryCards);
     // 刷新按钮：点击后重新拉取卡片，结束后恢复可点
     const refreshBtn = $('#btn-nav-refresh');
     const cardCallsBefore = calls.filter(call => call.url === '/api/cards').length;

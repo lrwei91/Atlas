@@ -1,6 +1,6 @@
 /*
  * Atlas 知识库工作台 — 本地服务器（读为主，Markdown 支持在线编辑与安全删除）
- * 数据源：Obsidian 主库（iCloud 同步目录），零依赖 Node.js
+ * 数据源：Obsidian 主库（iCloud Drive 同步目录），零依赖 Node.js
  * API:
  *   GET  /                  前端页面
  *   GET  /api/tree          分类目录树（notes/）
@@ -22,8 +22,9 @@ const readBody = require('./request-body');
 const versionOf = require('./document-version');
 const reader = require('./public/reader');
 const responses = require('./response-cache');
+const imageSize = require('./image-size');
 
-const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/iCloud~md~obsidian/Documents/主库');
+const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/com~apple~CloudDocs/知识库');
 const NOTES = path.join(VAULT, 'notes');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 4317);
@@ -113,31 +114,48 @@ function walk(dir, cb) {
 
 function relToNotes(full) { return path.relative(NOTES, full).split(path.sep).join('/'); }
 
-/* 卡片封面：优先引用 frontmatter 内嵌封面，否则取正文首张本地图片，视频不算。
+/* 卡片封面：优先读取 frontmatter.cover，兼容旧内嵌封面，再取正文首张本地图片。
    命中本地文件时返回可访问的 /files/ 路径，避免前端二次解析。 */
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 function coverFrom(content, rel) {
   const source = reader.body(content);
   const frontmatter = content.slice(0, content.length - source.length);
+  const coverField = frontmatter.match(/^cover:[ \t]*(.*)$/m);
+  let explicitCover = coverField?.[1].trim() || '';
+  // cover 是单行 YAML 字符串；不把其他元数据或正文同名字段当作封面。
+  if (explicitCover.startsWith('"')) {
+    const quoted = explicitCover.match(/^"(?:[^"\\]|\\.)*"(?=\s*(?:#.*)?$)/);
+    try { explicitCover = quoted ? JSON.parse(quoted[0]) : ''; } catch { explicitCover = ''; }
+  } else if (explicitCover.startsWith("'")) {
+    const quoted = explicitCover.match(/^'((?:[^']|'')*)'\s*(?:#.*)?$/);
+    explicitCover = quoted ? quoted[1].replace(/''/g, "'") : '';
+  } else {
+    explicitCover = explicitCover.replace(/\s+#.*$/, '').trim();
+  }
+  explicitCover = explicitCover.replace(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/, '$1');
+  if (/^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(explicitCover)) return explicitCover;
   const embeddedCover = frontmatter.match(/!\[[^\]\r\n]*\]\((data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]+={0,2})\)/i);
-  if (embeddedCover) return embeddedCover[1];
   const patterns = [
     /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g,          // Obsidian 内嵌图片
     /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,       // Markdown 图片
     /<img[^>]+src=["']([^"']+)["']/gi,                  // HTML 图片
   ];
-  const candidates = [];
+  const candidates = explicitCover && !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(explicitCover) ? [explicitCover] : [];
+  const bodyCandidates = [];
   for (const re of patterns) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(source))) {
       const raw = m[1].split(/[?#]/)[0].trim();
-      if (raw && !/^(https?:|data:|file:)/i.test(raw)) candidates.push(raw);
-      if (candidates.length >= 8) break;
+      if (raw && !/^(https?:|data:|file:)/i.test(raw)) bodyCandidates.push(raw);
+      if (bodyCandidates.length >= 8) break;
     }
-    if (candidates.length) break;
+    if (bodyCandidates.length) break;
   }
+  if (embeddedCover) candidates.push(embeddedCover[1]);
+  candidates.push(...bodyCandidates);
   for (const raw of candidates) {
+    if (raw.startsWith('data:')) return raw;
     let target = raw;
     try { target = decodeURIComponent(target); } catch {}
     target = target.replace(/^\/files\//, '').replace(/^\.\//, '');
@@ -157,7 +175,7 @@ function coverFrom(content, rel) {
         catch { relToVault = path.relative(VAULT, abs); }
         const normalized = relToVault.split(path.sep).join('/');
         if (normalized.startsWith('..')) continue;   // 越界则不作为封面
-        return '/files/' + normalized;
+        return '/files/' + normalized.split('/').map(encodeURIComponent).join('/');
       }
     }
   }
@@ -172,6 +190,7 @@ function cardDetails(entry, rel) {
       title: ((body.match(/^#\s+(.+)$/m) || [])[1] || path.basename(rel, '.md')).trim().slice(0, 80),
       excerpt: excerptFrom(entry.content), chars: body.length,
       embeddedCover: embedded?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : null,
+      ...(embedded?.startsWith('data:') ? imageSize(Buffer.from(embedded.split(',')[1], 'base64')) : {}),
     };
   }
   const { embeddedCover, ...details } = entry.card;
@@ -336,7 +355,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (await auth.handle(req, res, p)) return;
     if (p === '/login') { sendFile(req, res, path.join(PUBLIC_DIR, 'login.html')); return; }
-    if (['/reader.js', '/vendor/marked.min.js', '/vendor/highlight.min.js', '/vendor/hl-theme.css'].includes(p) && req.method === 'GET') {
+    if (['/reader.js', '/page-touch.js', '/atlas-ui.css', '/vendor/marked.min.js', '/vendor/highlight.min.js', '/vendor/hl-theme.css'].includes(p) && req.method === 'GET') {
       sendFile(req, res, path.join(PUBLIC_DIR, p.slice(1))); return;
     }
     if (p.startsWith('/share/') || p.startsWith('/s/')) {

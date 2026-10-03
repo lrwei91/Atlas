@@ -44,6 +44,8 @@ const { spawn } = require('node:child_process');
     assert.equal(fs.readFileSync(path.join(state, 'admin.json'), 'utf8').includes(credentials.password), false);
     assert.equal((await post('/auth/setup', credentials)).status, 409);
     const get = route => fetch(base + route, { headers: { Cookie: cookie } });
+    assert.equal((await fetch(base + '/page-touch.js')).status, 200);
+    assert.equal((await fetch(base + '/atlas-ui.css')).status, 200);
     assert.equal((await get('/api/cards')).status, 200);
     for (const endpoint of ['/api/cards', '/api/tree', '/api/doc?path=test.md']) {
       const first = await get(endpoint), tag = first.headers.get('etag');

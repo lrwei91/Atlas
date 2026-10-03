@@ -8,6 +8,7 @@
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
 <script src="/reader.js?v=20261002-links1"></script>
+<script src="/page-touch.js"></script>
 <link rel="stylesheet" href="/vendor/hl-theme.css">
 <style>
 /* ================= 白纸油墨基线 · 语义 token ================= */
@@ -36,6 +37,7 @@
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+html, body { touch-action: pan-x pan-y; }
 body {
   font-family: var(--font);
   color: var(--text-primary);
@@ -471,6 +473,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .grid .card {
     margin: 0 0 8px; padding: 0; overflow: hidden; gap: 0; min-width: 0;
     background: var(--surface); border-radius: var(--radius-card);
+    animation: none;
   }
   .grid .card .c-media {
     position: relative; background: var(--surface-subtle);
@@ -737,8 +740,9 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   aside #nav-tree { flex: none; overflow: visible; }
 }
 </style>
+<link rel="stylesheet" href="/atlas-ui.css?v=20261003-editorial1">
 </head>
-<body>
+<body class="atlas-workbench">
 
 <div id="progress"></div>
 
@@ -762,6 +766,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 
 <div class="layout">
   <aside id="sidebar">
+    <div class="m-drawer-head"><b>分类与日历</b><button id="btn-nav-close" aria-label="关闭分类">×</button></div>
     <div id="nav-tree"></div>
     <div id="calendar"></div>
   </aside>
@@ -825,13 +830,13 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     <button class="m-icon" id="btn-m-back" aria-label="返回">‹</button>
     <span class="spacer"></span>
     <button class="m-icon" id="btn-m-share" aria-label="分享" title="分享"></button>
-    <button class="m-icon" id="btn-m-more" aria-label="更多">···</button>
+    <button class="m-icon" id="btn-m-more" aria-label="更多" aria-controls="m-rmenu" aria-expanded="false">···</button>
   </div>
   <div class="m-body" id="m-reader-body"></div>
   <button class="m-totop" id="m-totop-reader" aria-label="回到顶部">↑</button>
 </section>
 
-<div class="m-rmenu" id="m-rmenu" hidden-m>
+<div class="m-rmenu" id="m-rmenu" role="group" aria-label="文档操作" hidden-m>
   <button id="m-rm-edit">编辑原文</button>
   <button id="m-rm-copy">复制分享链接</button>
   <button id="m-rm-del" class="danger">删除文档</button>
@@ -853,6 +858,11 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   clearEditor();
   location.replace('/login');
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && event.target.matches('.card[role=link], .result[role=link]')) {
+    event.preventDefault(); event.target.click();
+  }
 });
 /* ============ 状态 ============ */
 let allCards = [];
@@ -1018,13 +1028,15 @@ function mCardHTML(c, i) {
   let media;
   if (c.isMarkdown && c.cover) {
     // 真实封面按原图比例显示，不裁剪。
-    media = `<div class="c-media cover-img"><img src="${esc(c.cover)}" alt="" loading="lazy" decoding="async">${badge}</div>`;
+    const dimensions = Number.isFinite(c.coverWidth) && c.coverWidth > 0 && Number.isFinite(c.coverHeight) && c.coverHeight > 0
+      ? ` width="${c.coverWidth}" height="${c.coverHeight}"` : '';
+    media = `<div class="c-media cover-img"><img src="${esc(c.cover)}"${dimensions} alt="" loading="lazy" decoding="async">${badge}</div>`;
   } else if (c.isMarkdown) {
     media = `<div class="c-media ${dim}"><span class="c-glyph" style="background:${mTint(c.dir)}">${esc(catLabel(c.dir).slice(0,1))}</span>${badge}</div>`;
   } else {
     media = `<div class="c-media" style="aspect-ratio:auto;padding:16px 10px"><span class="c-badge-n" style="position:static;background:var(--surface-subtle);color:var(--text-secondary)">非 Markdown</span></div>`;
   }
-  return `<article class="card" data-rel="${esc(c.relPath)}">
+  return `<article class="card" role="link" tabindex="0" data-rel="${esc(c.relPath)}">
     ${media}
     <div class="c-text">
       <div class="c-title">${esc(c.title)}</div>
@@ -1039,29 +1051,49 @@ function mCardHTML(c, i) {
 
 /* ============ 移动端双列瀑布流布局 ============
    卡片顺序即列表顺序，逐个放入当前较矮的一列 → 顶部先左右分列，再往下排。
-   两列等宽，先把卡片集中到左列批量测量（单次 reflow），移动节点比反复读高度便宜。 */
+   两列等宽，原位批量测量；只移动确实换列的节点，避免图片逐张加载时全量搬运。 */
+function masonryColumns(grid) { return getComputedStyle(grid).getPropertyValue('--masonry-columns').trim() === '1' ? 1 : 2; }
+function needsMasonryLayout(grid) { return grid.clientWidth !== grid.masonryWidth || masonryColumns(grid) !== grid.masonryColumns; }
 function layoutMasonry(grid, cards) {
+  if (!grid.isConnected || !isMobile()) return;
   const [left, right] = grid.children;
-  for (const card of cards) left.appendChild(card);
-  const heights = cards.map(card => card.offsetHeight);
-  let lh = 0, rh = 0;
+  const columnCount = masonryColumns(grid);
+  const heights = cards.map(card => card.offsetHeight + 8);
+  const columns = [[], []], totals = [0, 0];
   cards.forEach((card, i) => {
-    if (lh <= rh) { left.appendChild(card); lh += heights[i]; }
-    else { right.appendChild(card); rh += heights[i]; }
+    const col = columnCount === 1 || totals[0] <= totals[1] ? 0 : 1;
+    columns[col].push(card); totals[col] += heights[i];
   });
+  [left, right].forEach((column, i) => {
+    let cursor = column.firstElementChild;
+    for (const card of columns[i]) {
+      if (card === cursor) cursor = cursor.nextElementSibling;
+      else column.insertBefore(card, cursor);
+    }
+  });
+  grid.masonryWidth = grid.clientWidth;
+  grid.masonryColumns = columnCount;
 }
 /* jsdom 等环境没有 requestAnimationFrame，退回定时器 */
 const nextFrame = cb => (window.requestAnimationFrame ? requestAnimationFrame(cb) : setTimeout(cb, 16));
 function scheduleMasonry(grid) {
-  nextFrame(() => { if (grid.isConnected && grid.masonry) layoutMasonry(grid, grid.masonry); });
+  if (grid.masonryPending) return;
+  grid.masonryPending = true;
+  nextFrame(() => {
+    grid.masonryPending = false;
+    if (grid.isConnected && grid.masonry) layoutMasonry(grid, grid.masonry);
+  });
 }
 function mountMasonry(grid, cards) {
   grid.masonry = cards;
   layoutMasonry(grid, cards);
-  // 封面图加载完高度才确定；加载失败时按占位尺寸重排一次即可
-  for (const img of grid.querySelectorAll('img:not([data-done])')) {
+  // 已知宽高提前占位；没有尺寸或加载失败时合并重排，补偿实际高度变化。
+  for (const img of grid.querySelectorAll('img')) {
     if (img.complete) continue;
-    const done = () => { img.dataset.done = '1'; scheduleMasonry(grid); };
+    const done = () => {
+      img.removeEventListener('load', done); img.removeEventListener('error', done);
+      scheduleMasonry(grid);
+    };
     img.addEventListener('load', done, { once: true });
     img.addEventListener('error', done, { once: true });
   }
@@ -1104,13 +1136,17 @@ function reloadDoc(relPath) {
   return renderDoc(relPath, epoch).catch(error => showViewError(error, epoch));
 }
 function toggleSidebar(open) {
+  const returnFocus = $('#sidebar').contains(document.activeElement);
   $('#sidebar').classList.toggle('is-open', open);
   $('#btn-nav').setAttribute('aria-expanded', String(open));
   // 移动端侧栏与遮罩联动
   const mask = $('#m-mask');
   if (mask && !mask.hasAttribute('hidden-m')) mask.classList.toggle('on', open);
+  if (isMobile() && open) $('#btn-nav-close').focus();
+  else if (isMobile() && returnFocus) $('#btn-nav').focus();
 }
 $('#btn-nav').onclick = () => toggleSidebar(!$('#sidebar').classList.contains('is-open'));
+$('#btn-nav-close').onclick = () => toggleSidebar(false);
 
 /* ============ 数据加载 ============ */
 async function loadCards() {
@@ -1271,7 +1307,7 @@ function refreshList() {
     <div class="view-head"><h1>${esc(viewTitle)}</h1><span class="sub">${esc(viewSub)}</span></div>
     ${filterBarHTML(list.length)}
     ${list.length ? `<div class="grid">${list.map((c, i) => `
-      <div class="card" data-rel="${esc(c.relPath)}" style="animation-delay:${Math.min(i, 24) * 80}ms">
+      <div class="card" role="link" tabindex="0" data-rel="${esc(c.relPath)}" style="animation-delay:${Math.min(i, 24) * 80}ms">
         <div class="c-top">${badgeHTML(c.dir)}<span class="c-date">${fmtDate(c.mtime)}</span></div>
         <div class="c-title">${esc(c.title)}</div>
         <div class="c-excerpt">${esc(c.excerpt) || (c.isMarkdown ? '' : '非 Markdown 文件 · ' + fmtSize(c.size))}</div>
@@ -1332,6 +1368,8 @@ function renderMobileList(list, emptyText) {
     });
     retainList(target, key);
   }
+  const mountedGrid = target.querySelector('.m-masonry');
+  if (mountedGrid && needsMasonryLayout(mountedGrid)) scheduleMasonry(mountedGrid);
   target.scrollTop = restoreMobileFeed ? mobileFeedScroll : 0;
   syncToTop();
 }
@@ -1465,7 +1503,10 @@ function closeRmenu() {
 function forceCloseRmenu() {
   clearTimeout(mDeleteTimer);
   const menu = $('#m-rmenu');
+  const returnFocus = menu.contains(document.activeElement);
   menu.classList.remove('on', 'destructive');
+  $('#btn-m-more').setAttribute('aria-expanded', 'false');
+  if (returnFocus) $('#btn-m-more').focus();
   mDeleteArmed = false;
   if (mDeleteBtn) { mDeleteBtn.textContent = '删除文档'; mDeleteBtn.classList.remove('armed'); }
 }
@@ -1817,7 +1858,7 @@ async function renderSearch(q, epoch = ++viewEpoch) {
     return s;
   };
   const results = j.results.map((res, i) => `
-      <div class="result" data-rel="${esc(res.relPath)}" style="animation-delay:${Math.min(i, 20) * 80}ms">
+      <div class="result" role="link" tabindex="0" data-rel="${esc(res.relPath)}" style="animation-delay:${Math.min(i, 20) * 80}ms">
         <div class="r-title">${hl(res.title)}</div>
         <div class="r-dir">${badgeHTML(res.dir)} <span style="margin-left:6px">${esc(res.dir || '根目录')} · ${fmtDate(res.mtime)}</span></div>
         ${res.snippets.map(s => `<div class="r-snippet">…${hl(s)}…</div>`).join('')}
@@ -1982,7 +2023,9 @@ window.addEventListener('hashchange', renderView);
 function syncMobileTabs() {
   document.querySelectorAll('#m-tabbar .m-item').forEach(btn => {
     const v = btn.dataset.nav;
-    btn.classList.toggle('on', v === route.view && v !== 'me');
+    const current = v === route.view && v !== 'me';
+    btn.classList.toggle('on', current);
+    if (current) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current');
   });
 }
 function openMask() { $('#m-mask').classList.add('on'); }
@@ -2126,12 +2169,19 @@ $('#btn-nav-refresh').onclick = async () => {
 /* 列宽变化（旋转屏幕/窗口缩放）后重排瀑布流 */
 window.addEventListener('resize', () => {
   const grid = $('#m-scroll .m-masonry');
-  if (grid && grid.masonry) scheduleMasonry(grid);
+  if (grid && grid.masonry && needsMasonryLayout(grid)) scheduleMasonry(grid);
 });
 $('#m-search-cancel').onclick = closeAllOverlays;
 $('#m-mask').onclick = closeAllOverlays;
 $('#btn-m-back').onclick = mCloseReader;
-$('#btn-m-more').onclick = e => { e.stopPropagation(); $('#m-rmenu').classList.toggle('on'); };
+$('#btn-m-more').onclick = e => {
+  e.stopPropagation();
+  const menu = $('#m-rmenu');
+  if (menu.classList.contains('on')) { forceCloseRmenu(); return; }
+  menu.classList.add('on');
+  $('#btn-m-more').setAttribute('aria-expanded', 'true');
+  menu.querySelector('button:not([hidden]):not(:disabled)')?.focus();
+};
 $('#btn-m-share').onclick = () => mShareAction?.();
 $('#m-rmenu').onclick = e => e.stopPropagation();
 document.addEventListener('click', () => closeRmenu());
