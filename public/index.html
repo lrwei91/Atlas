@@ -309,6 +309,10 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 ::-webkit-scrollbar-thumb:hover { background: #B8B8AC; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* 返回手势仅在拖动/收尾阶段接管面板 transform。 */
+.is-swiping { transition: none !important; will-change: transform; }
+.swipe-settling { transition: transform .18s var(--ease-editorial); }
+
 /* ================= 降级 ================= */
 /* 触屏：取消 hover 抬升与阴影 */
 @media (hover: none) {
@@ -318,11 +322,12 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   .card:hover, .result:hover { transform: none; box-shadow: none; }
+  #btn-nav-refresh.on::after { animation: none !important; }
   html { scroll-behavior: auto; }
 }
 
 .mobile-nav { display: none; }
-#btn-nav-search { display: none; }
+#btn-nav-search, #btn-nav-refresh { display: none; }
 .searchbox { min-width: 0; }
 /* 移动端专属节点：桌面端一律隐藏，JS 检测到窄屏后移除该属性再启用 */
 [hidden-m] { display: none !important; }
@@ -355,23 +360,34 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 @media (max-width: 767px) {
   body { background: var(--canvas); overflow: hidden; }
 
-  /* ---- 顶栏：仅左右两个圆形按钮，品牌标识在侧栏 ---- */
+  /* ---- 顶栏：左右两个圆形按钮 + 中间品牌；底部留出与内容更大的间距 ---- */
   header {
-    height: 46px; padding: 0 8px; gap: 6px;
+    position: relative;
+    height: 62px; padding: 0 10px; gap: 6px;
     padding-top: env(safe-area-inset-top);
-    height: calc(46px + env(safe-area-inset-top));
+    height: calc(62px + env(safe-area-inset-top));
     background: var(--canvas);
+    border-bottom: none;   /* 移动端不画分隔线，靠留白区分层级 */
+    align-items: flex-start;
   }
+  #btn-nav, #btn-nav-search, #btn-nav-refresh { margin-top: 6px; }
+  #btn-nav { margin-right: auto; }   /* 品牌为绝对定位，需auto 把右侧按钮组推到边 */
   .brand { display: none; }
   .searchbox { display: none; }
-  #btn-nav, #btn-nav-search {
+  #btn-nav, #btn-nav-search, #btn-nav-refresh {
     width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-secondary); cursor: pointer; padding: 0;
-    font-size: 0;overflow: hidden;   /* 隐藏「浏览」等文字，仅留图标 */
+    font-size: 0; overflow: hidden;   /* 隐藏「浏览」等文字，仅留图标 */
   }
-  #btn-nav { margin-right: auto; }
+  /* 顶栏品牌：随顶栏高度居中 */
+  .m-brand {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, calc(-50% + 3px));
+    font-size: 17px; font-weight: 750; letter-spacing: -0.01em;
+    color: var(--text-primary); pointer-events: none; white-space: nowrap;
+  }
   #btn-nav::after {
     content: ''; width: 17px; height: 17px; flex-shrink: 0;
     background: currentColor;
@@ -384,17 +400,28 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.3' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20.5 20.5 16 16'/%3E%3C/svg%3E") center/contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.3' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20.5 20.5 16 16'/%3E%3C/svg%3E") center/contain no-repeat;
   }
+  #btn-nav-refresh::after {
+    content: ''; width: 16px; height: 16px; flex-shrink: 0;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E") center/contain no-repeat;
+  }
+  #btn-nav-refresh:disabled { opacity: .45; cursor: default; }
+  #btn-nav-refresh.on::after { animation: m-spin .8s linear infinite; }
+  @keyframes m-spin { to { transform: rotate(1turn); } }
+
   .header-right { display: none; }
   .header-right .stat { display: none; }
   #btn-random, #btn-logout { display: none; }
-  #progress { top: calc(46px + env(safe-area-inset-top)); }
+  #progress { top: calc(62px + env(safe-area-inset-top)); }
 
   /* ---- 布局 ---- */
-  .layout { padding-top: calc(46px + env(safe-area-inset-top)); }
+  .layout { padding-top: calc(62px + env(safe-area-inset-top)); }
   main { display: none; }   /* 移动端内容改由 #m-root 承载 */
   #m-root {
     position: fixed; left: 0; right: 0;
-    top: calc(46px + env(safe-area-inset-top));
+    /* 顶栏 62px（44px 按钮 + 上下共18px 留白），内容不再紧贴 */
+    top: calc(62px + env(safe-area-inset-top));
     bottom: calc(54px + env(safe-area-inset-bottom));
     display: flex; flex-direction: column; overflow: hidden;
   }
@@ -436,12 +463,12 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .m-viewhead b { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; }
   .m-viewhead span { font-family: var(--mono); font-size: 11px; color: var(--text-subtle); min-width: 0; overflow-wrap: anywhere; }
 
-  /* ---- 双列瀑布流：卡片媒体区高度刻意不等高，维持错落 ---- */
-  .grid {
-    display: block; column-count: 2; column-gap: 8px;
-  }
+  /* ---- 双列瀑布流：卡片媒体区高度刻意不等高，维持错落 ----
+     分列由 JS 的最短列贪心完成（见 layoutMasonry），
+     不用 CSS column-count：多列是「列优先」填充，新卡片会全堆在左列顶部。 */
+  .grid.m-masonry { display: flex; align-items: flex-start; gap: 8px; }
+  .m-masonry .m-col { flex: 1 1 0; min-width: 0; }
   .grid .card {
-    break-inside: avoid; -webkit-column-break-inside: avoid;
     margin: 0 0 8px; padding: 0; overflow: hidden; gap: 0; min-width: 0;
     background: var(--surface); border-radius: var(--radius-card);
   }
@@ -452,10 +479,9 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   .grid .card .c-media.h1 { aspect-ratio: 4 / 5; }
   .grid .card .c-media.h2 { aspect-ratio: 1 / 1; }
   .grid .card .c-media.h3 { aspect-ratio: 5 / 4; }
-  .grid .card .c-media.cover-img { aspect-ratio: 16 / 9; }
+  .grid .card .c-media.cover-img { display: block; }
   .grid .card .c-media.cover-img img {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; object-position: center; display: block;
+    width: 100%; height: auto; display: block;
   }
   .grid .card .c-media .c-glyph {
     width: 40px; height: 40px; border-radius: 12px;
@@ -510,20 +536,16 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   }
   .m-tabbar .m-item.fab-item .m-label { margin-top: 32px; }
 
-  /* ---- 抽屉（分类） ---- */
+  /* 抽屉（分类）：分组标题贴近顶部，无多余留白 */
   aside {
     display: none; z-index: 130; width: min(320px, 86vw);
     top: 0; bottom: 0; height: 100dvh;
     background: var(--canvas); box-shadow: 8px 0 30px rgba(0,0,0,.14);
-    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-top: calc(10px + env(safe-area-inset-top));
   }
   aside.is-open { display: flex; }
-  #btn-nav-close { display: inline-flex; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 14px; width: 44px; height: 44px; padding: 0; font-size: 0; border-radius: 50%; align-items: center; justify-content: center; }
-  #btn-nav-close::after { content: '×'; font-size: 24px; line-height: 1; }
-  .m-drawer-brand { flex-shrink: 0; padding: 8px 54px 14px 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; display: block; }
-  .m-drawer-brand b { display: block; font-size: 22px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.2; }
-  .m-drawer-brand span { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle); margin-top: 4px; }
-  #nav-tree { padding-bottom: 8px; }
+  aside .nav-label { padding: 6px 20px 6px; }
+  #nav-tree { padding: 0 0 8px; }
   #calendar { padding: 10px 6px calc(14px + env(safe-area-inset-bottom)); }
   aside .nav-item { min-height: 44px; }
   aside .nav-sub .nav-item { min-height: 40px; }
@@ -559,23 +581,34 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   }
   .m-mepage.on { display: flex; }
   .m-mepage .m-mbar {
-    flex-shrink: 0; height: calc(46px + env(safe-area-inset-top));
-    padding: env(safe-area-inset-top) 8px 0; display: flex; align-items: center;
-    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; height: calc(62px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 10px 0; display: flex; align-items: flex-start;
   }
   .m-mepage .m-mbar .m-icon {
-    width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
+    width: 44px; height: 44px; margin-top: 6px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-primary); cursor: pointer; font-size: 15px; line-height: 1;
   }
-  .m-mepage .m-mbar .t { flex: 1; min-width: 0; text-align: center; font-size: 15.5px; font-weight: 700; }
+  .m-mepage .m-mbar .t {
+    flex: 1; min-width: 0; text-align: center; font-size: 16px; font-weight: 750;
+    line-height: 62px; letter-spacing: -0.01em;
+  }
   .m-mepage .m-body, .m-reader-shell .m-body { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .m-mepage .m-grp { font-family: var(--mono); font-size: 10px; color: var(--text-subtle); letter-spacing: .2em; padding: 16px 16px 8px; }
   .m-mepage .m-profile { display: flex; align-items: center; gap: 12px; padding: 8px 16px 16px; }
   .m-mepage .m-profile .av { width: 48px; height: 48px; border-radius: 15px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 750; font-size: 17px; flex-shrink: 0; }
   .m-mepage .m-profile .nm { font-size: 15px; font-weight: 700; }
   .m-mepage .m-profile .sub2 { font-family: var(--mono); font-size: 10.5px; color: var(--text-subtle); margin-top: 2px; }
+  /* 退出登录：账户卡右侧的图标按钮 */
+  .m-mepage .m-logout {
+    width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface); border: 1px solid var(--border);
+    color: #D6403A; cursor: pointer; padding: 0;
+  }
+  .m-mepage .m-logout:active { background: var(--surface-subtle); }
+  .m-mepage .m-logout svg { width: 18px; height: 18px; }
   .m-mepage .m-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 0 16px 4px; }
   .m-mepage .m-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px 6px; text-align: center; }
   .m-mepage .m-stat b { display: block; font-size: 19px; font-weight: 750; }
@@ -601,11 +634,25 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
     flex-shrink: 0; height: calc(46px + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 8px 0; display: flex; align-items: center; gap: 4px;
   }
+  .m-reader-shell .m-rbar {
+    flex-shrink: 0; height: calc(62px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 10px 0; display: flex; align-items: flex-start; gap: 4px;
+  }
   .m-reader-shell .m-rbar .m-icon {
-    width: 44px; height: 44px; flex-shrink: 0; border-radius: 999px;
+    width: 44px; height: 44px; margin-top: 6px; flex-shrink: 0; border-radius: 999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text-primary); cursor: pointer; font-size: 15px; line-height: 1;
+  }
+  /* 分享按钮双状态：未分享=描边分享图标；已分享=黄色实底 + 深色对勾。
+     用 background-image 画 SVG，不用 mask —— mask 会把 background-color 一起遮掉。 */
+  #btn-m-share {
+    background: transparent center/19px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2353534E' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3.5'/%3E%3Cpath d='M7.5 8L12 3.5 16.5 8'/%3E%3Cpath d='M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6'/%3E%3C/svg%3E");
+  }
+  #btn-m-share.shared {
+    background-color: var(--accent);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23171715' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+    border-color: var(--accent);
   }
   .m-reader-shell .m-rbar .spacer { flex: 1; }
   .m-rmenu {
@@ -698,12 +745,14 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 <header>
   <button id="btn-nav" class="btn-ghost mobile-nav" aria-controls="sidebar" aria-expanded="false" aria-label="分类" title="分类">浏览</button>
   <div class="brand"><b>Atlas</b><span>KNOWLEDGE WORKBENCH</span></div>
+  <div class="m-brand" id="m-brand" hidden-m>Atlas</div>
   <div class="searchbox">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
     <input id="search-input" type="text" placeholder="全文检索标题与正文…" autocomplete="off">
     <kbd>/</kbd>
   </div>
   <button id="btn-nav-search" aria-label="搜索" title="搜索"></button>
+  <button id="btn-nav-refresh" aria-label="刷新最新数据" title="刷新最新数据"></button>
   <div class="header-right">
     <div class="stat" id="stat"></div>
     <button class="btn-ghost" id="btn-logout">退出登录</button>
@@ -713,8 +762,6 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 
 <div class="layout">
   <aside id="sidebar">
-    <button id="btn-nav-close" class="btn-ghost mobile-nav">关闭导航</button>
-    <div class="m-drawer-brand" hidden-m><b>Atlas</b><span id="brand-sub">知识库</span></div>
     <div id="nav-tree"></div>
     <div id="calendar"></div>
   </aside>
@@ -777,7 +824,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   <div class="m-rbar">
     <button class="m-icon" id="btn-m-back" aria-label="返回">‹</button>
     <span class="spacer"></span>
-    <button class="m-icon" id="btn-m-share" aria-label="分享">↑</button>
+    <button class="m-icon" id="btn-m-share" aria-label="分享" title="分享"></button>
     <button class="m-icon" id="btn-m-more" aria-label="更多">···</button>
   </div>
   <div class="m-body" id="m-reader-body"></div>
@@ -787,7 +834,6 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 <div class="m-rmenu" id="m-rmenu" hidden-m>
   <button id="m-rm-edit">编辑原文</button>
   <button id="m-rm-copy">复制分享链接</button>
-  <button id="m-rm-revoke" hidden>取消分享</button>
   <button id="m-rm-del" class="danger">删除文档</button>
 </div>
 
@@ -797,7 +843,9 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
 const nativeFetch = window.fetch.bind(window);
 window.fetch = async (...args) => {
   const response = await nativeFetch(...args);
-  if (response.status === 401) { location.replace('/login'); throw new Error('登录已过期'); }
+  if (response.status === 401) { clearViewCaches(); location.replace('/login'); throw new Error('登录已过期'); }
+  const method = args[1]?.method || 'GET';
+  if (response.ok && (String(args[0]).startsWith('/api/doc?') && method !== 'GET' || String(args[0]) === '/auth/logout')) clearViewCaches();
   return response;
 };
 document.getElementById('btn-logout').addEventListener('click', async () => {
@@ -815,12 +863,78 @@ let pendingDocHeading = null;
 let nameIndex = {};   // 文件名(不含扩展) -> relPath
 let route = { view: 'all', param: '' };
 let mobileReturnRoute = { view: 'all', param: '' };
+let mobileReaderTrail = [];
+let mobileHistoryEntry = null;
+let mobileHistorySequence = 0;
+let mobileFeedScroll = 0;
+let restoreMobileFeed = false;
 let filters = { period: 'all', sort: 'new' };   // 时间段筛选 + 排序
 let baseList = [];       // 当前视图基础卡片集（未应用筛选项）
 let viewTitle = '', viewSub = '';
 let viewEpoch = 0;
 let acceptedHash = location.hash;
 let editState = null;
+
+/* 页面内缓存，不写入 localStorage/IndexedDB。每次打开文档仍校验服务器。 */
+function boundedViewCache(limit, maxEntries = 20) {
+  const values = new Map(); let bytes = 0;
+  return {
+    get(key) { const hit = values.get(key); if (hit) { values.delete(key); values.set(key, hit); } return hit?.value; },
+    set(key, value, size) {
+      const old = values.get(key); if (old) { bytes -= old.size; values.delete(key); }
+      if (size > limit) return;
+      while (values.size && (bytes + size > limit || values.size >= maxEntries)) {
+        const first = values.keys().next().value; bytes -= values.get(first).size; values.delete(first);
+      }
+      values.set(key, { value, size }); bytes += size;
+    },
+    clear() { values.clear(); bytes = 0; },
+  };
+}
+const documentViews = boundedViewCache(16 * 1024 * 1024);
+const articleViews = boundedViewCache(8 * 1024 * 1024);
+const pendingDocuments = new Map();
+let cacheGeneration = 0;
+let listMounts = new WeakMap();
+function clearViewCaches() {
+  cacheGeneration++; documentViews.clear(); articleViews.clear(); pendingDocuments.clear(); listMounts = new WeakMap();
+}
+async function fetchDocument(rel) {
+  if (pendingDocuments.has(rel)) return pendingDocuments.get(rel);
+  const cached = documentViews.get(rel), generation = cacheGeneration;
+  const task = (async () => {
+    const response = await fetch('/api/doc?path=' + encodeURIComponent(rel), cached?.etag ? { headers: { 'If-None-Match': cached.etag } } : undefined);
+    if (generation !== cacheGeneration) return fetchDocument(rel);
+    if (response.status === 304 && cached) return { ok: true, doc: cached.doc };
+    if (!response.ok) return { ok: false };
+    const doc = await response.json();
+    if (generation !== cacheGeneration) return fetchDocument(rel);
+    const etag = response.headers?.get('etag');
+    if (etag) documentViews.set(rel, { doc, etag }, JSON.stringify(doc).length * 2);
+    return { ok: true, doc };
+  })();
+  pendingDocuments.set(rel, task);
+  try { return await task; }
+  finally { if (pendingDocuments.get(rel) === task) pendingDocuments.delete(rel); }
+}
+function articleHTML(doc) {
+  const key = JSON.stringify([AtlasReader.body(doc.content), doc.assets, doc.links, doc.links ? null : nameIndex]);
+  const hit = articleViews.get(key);
+  if (hit !== undefined) return hit;
+  const html = AtlasReader.render(doc, { names: nameIndex, assetUrl: fileUrl });
+  articleViews.set(key, html, (key.length + html.length) * 2);
+  return html;
+}
+function listKey(list, emptyText) {
+  return JSON.stringify([viewTitle, viewSub, filters, route.view === 'shared', ymdOf(Date.now()), emptyText, list]);
+}
+function restoreList(target, key) {
+  const hit = listMounts.get(target);
+  if (!hit || hit.key !== key) return false;
+  if (target.firstChild !== hit.nodes[0]) target.replaceChildren(...hit.nodes);
+  return true;
+}
+function retainList(target, key) { listMounts.set(target, { key, nodes: [...target.childNodes] }); }
 
 const $ = (s) => document.querySelector(s);
 const main = $('#main');
@@ -889,7 +1003,7 @@ function fileUrl(relPath) {
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ---------- 移动端卡片：媒体区高度档位与占位色 ---------- */
-/* 媒体区高度刻意不等高（竖/方/横），配合 column-count 维持瀑布流错落感 */
+/* 媒体区高度刻意不等高（竖/方/横），配合双列瀑布流维持错落感 */
 const M_HUE = { '认知':18,'方法':42,'工具':190,'设计':320,'测试':258,'游戏':292,'生活':130,'阅读':350,'财务':200,'沟通':168,'系统':240 };
 const M_DIMS = ['h1','h2','h3'];
 function mHue(dir) {
@@ -903,7 +1017,7 @@ function mCardHTML(c, i) {
   const badge = `<span class="c-badge-n">${c.isMarkdown ? fmtNum(c.chars) + ' 字' : fmtSize(c.size)}</span>`;
   let media;
   if (c.isMarkdown && c.cover) {
-    // 真实封面图：16:9，object-fit 居中裁切
+    // 真实封面按原图比例显示，不裁剪。
     media = `<div class="c-media cover-img"><img src="${esc(c.cover)}" alt="" loading="lazy" decoding="async">${badge}</div>`;
   } else if (c.isMarkdown) {
     media = `<div class="c-media ${dim}"><span class="c-glyph" style="background:${mTint(c.dir)}">${esc(catLabel(c.dir).slice(0,1))}</span>${badge}</div>`;
@@ -921,6 +1035,36 @@ function mCardHTML(c, i) {
       </div>
     </div>
   </article>`;
+}
+
+/* ============ 移动端双列瀑布流布局 ============
+   卡片顺序即列表顺序，逐个放入当前较矮的一列 → 顶部先左右分列，再往下排。
+   两列等宽，先把卡片集中到左列批量测量（单次 reflow），移动节点比反复读高度便宜。 */
+function layoutMasonry(grid, cards) {
+  const [left, right] = grid.children;
+  for (const card of cards) left.appendChild(card);
+  const heights = cards.map(card => card.offsetHeight);
+  let lh = 0, rh = 0;
+  cards.forEach((card, i) => {
+    if (lh <= rh) { left.appendChild(card); lh += heights[i]; }
+    else { right.appendChild(card); rh += heights[i]; }
+  });
+}
+/* jsdom 等环境没有 requestAnimationFrame，退回定时器 */
+const nextFrame = cb => (window.requestAnimationFrame ? requestAnimationFrame(cb) : setTimeout(cb, 16));
+function scheduleMasonry(grid) {
+  nextFrame(() => { if (grid.isConnected && grid.masonry) layoutMasonry(grid, grid.masonry); });
+}
+function mountMasonry(grid, cards) {
+  grid.masonry = cards;
+  layoutMasonry(grid, cards);
+  // 封面图加载完高度才确定；加载失败时按占位尺寸重排一次即可
+  for (const img of grid.querySelectorAll('img:not([data-done])')) {
+    if (img.complete) continue;
+    const done = () => { img.dataset.done = '1'; scheduleMasonry(grid); };
+    img.addEventListener('load', done, { once: true });
+    img.addEventListener('error', done, { once: true });
+  }
 }
 
 /* ============ 路由 ============ */
@@ -967,7 +1111,6 @@ function toggleSidebar(open) {
   if (mask && !mask.hasAttribute('hidden-m')) mask.classList.toggle('on', open);
 }
 $('#btn-nav').onclick = () => toggleSidebar(!$('#sidebar').classList.contains('is-open'));
-$('#btn-nav-close').onclick = () => { toggleSidebar(false); $('#m-mask')?.classList.remove('on'); $('#btn-nav').focus(); };
 
 /* ============ 数据加载 ============ */
 async function loadCards() {
@@ -1006,7 +1149,7 @@ function renderSidebar() {
     ${lean ? '' : `<button class="nav-item ${route.view==='shared'?'active':''}" data-route="shared">
       <span class="name">分享笔记</span>
       <span class="cnt">${allCards.filter(card => card.isShared).length}</span></button>`}
-    <div class="nav-label" style="margin-top:16px">分类</div>`;
+    <div class="nav-label"${lean ? '' : ' style="margin-top:16px"'}>分类</div>`;
   const renderNode = (node) => {
     const cnt = dirCounts.get(node.relPath) || 0;
     html += `<button class="nav-item ${route.view==='dir'&&route.param===node.relPath?'active':''}" data-dir="${esc(node.relPath)}">
@@ -1020,9 +1163,6 @@ function renderSidebar() {
   };
   for (const node of treeData.children) renderNode(node);
   sb.innerHTML = html;
-  // 侧栏品牌区副标题：移动端显示笔记数与数据来源
-  const brandSub = $('#brand-sub');
-  if (brandSub) brandSub.textContent = `${allCards.length} 篇`;
   sb.querySelectorAll('.nav-item').forEach(btn => {
     btn.onclick = () => {
       if (btn.dataset.route === 'shared') { setRoute('shared'); return; }
@@ -1124,6 +1264,8 @@ function refreshList() {
   const emptyText = viewTitle === '分享笔记' && !baseList.length ? '暂无已分享的笔记' : '该筛选条件下没有笔记';
 
   if (isMobile()) { renderMobileList(list, emptyText); return; }
+  const key = listKey(list, emptyText);
+  if (restoreList(main, key)) return;
 
   const html = `
     <div class="view-head"><h1>${esc(viewTitle)}</h1><span class="sub">${esc(viewSub)}</span></div>
@@ -1149,6 +1291,7 @@ function refreshList() {
       refreshList();
     }
   });
+  retainList(main, key);
 }
 
 /* ============ 移动端列表渲染 ============ */
@@ -1174,12 +1317,22 @@ function renderMobileList(list, emptyText) {
   }
 
   const target = $('#m-scroll');
-  target.innerHTML = list.length
-    ? `<div class="grid">${list.map((c, i) => mCardHTML(c, i)).join('')}</div>`
-    : emptyState(emptyText);
-  target.querySelectorAll('.card').forEach(el => {
-    el.onclick = () => setRoute('doc', el.dataset.rel);
-  });
+  const key = listKey(list, emptyText);
+  if (!restoreList(target, key)) {
+    target.innerHTML = list.length
+      ? '<div class="grid m-masonry"><div class="m-col"></div><div class="m-col"></div></div>'
+      : emptyState(emptyText);
+    if (list.length) {
+      const grid = target.firstElementChild;
+      grid.firstElementChild.innerHTML = list.map((c, i) => mCardHTML(c, i)).join('');
+      mountMasonry(grid, [...grid.firstElementChild.children]);
+    }
+    target.querySelectorAll('.card').forEach(el => {
+      el.onclick = () => setRoute('doc', el.dataset.rel);
+    });
+    retainList(target, key);
+  }
+  target.scrollTop = restoreMobileFeed ? mobileFeedScroll : 0;
   syncToTop();
 }
 
@@ -1195,10 +1348,10 @@ function renderCards(cards, title, sub) {
 async function renderDoc(relPath, epoch = ++viewEpoch) {
   if (isMobile()) return renderMobileDoc(relPath, epoch);
   main.innerHTML = emptyState('正在加载…');
-  const r = await fetch('/api/doc?path=' + encodeURIComponent(relPath));
+  const result = await fetchDocument(relPath);
   if (!isCurrentView(epoch)) return;
-  if (!r.ok) { main.innerHTML = emptyState('文档不存在或无法读取'); return; }
-  const doc = await r.json();
+  if (!result.ok) { main.innerHTML = emptyState('文档不存在或无法读取'); return; }
+  const doc = result.doc;
   if (!isCurrentView(epoch)) return;
   const card = allCards.find(c => c.relPath === relPath) || {};
 
@@ -1213,7 +1366,7 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
     document.title = (card.title || relPath) + ' · Atlas';
     return;
   }
-  const html = AtlasReader.render(doc, { names: nameIndex, assetUrl: fileUrl });
+  const html = articleHTML(doc);
 
   const dirLabel = card.dir || relPath.split('/').slice(0, -1).join('/');
   main.innerHTML = `
@@ -1283,7 +1436,7 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
       }
     };
   }
-  document.title = (card.title || relPath) + ' · Atlas';
+  document.title = (card.title || doc.title || relPath) + ' · Atlas';
   document.documentElement.scrollTop = 0;
   if (pendingDocHeading?.path === relPath) { AtlasReader.scrollToHeading(main, pendingDocHeading.heading); pendingDocHeading = null; }
   // 文内 wiki 跳转（hash 链接）
@@ -1297,9 +1450,14 @@ function mCloseReader() {
   if (!canLeaveEditor()) return;
   clearEditor();
   forceCloseRmenu();
+  mRevokeArmed = false;   // 重置分享取消确认态
   $('#m-reader-shell').classList.remove('on');
   $('#m-totop-reader').classList.remove('on');
-  if (parseHash().view === 'doc') setRoute(mobileReturnRoute.view, mobileReturnRoute.param);
+  if (parseHash().view === 'doc') {
+    const target = mobileReaderTrail.at(-1) || mobileReturnRoute;
+    if (target.native) history.back();
+    else setRoute(target.view, target.param);
+  }
 }
 function closeRmenu() {
   forceCloseRmenu();
@@ -1336,14 +1494,14 @@ async function renderMobileDoc(relPath, epoch) {
   shell.classList.add('on');
   body.scrollTop = 0;
   body.innerHTML = emptyState('正在加载…');
-  const r = await fetch('/api/doc?path=' + encodeURIComponent(relPath));
+  const result = await fetchDocument(relPath);
   if (!isCurrentView(epoch) || !isMobile()) return;
-  if (!r.ok) { body.innerHTML = emptyState('文档不存在或无法读取'); return; }
-  const doc = await r.json();
+  if (!result.ok) { body.innerHTML = emptyState('文档不存在或无法读取'); return; }
+  const doc = result.doc;
   if (!isCurrentView(epoch) || !isMobile()) return;
   const card = allCards.find(c => c.relPath === relPath) || {};
   const dirLabel = card.dir || relPath.split('/').slice(0, -1).join('/');
-  const title = card.title || relPath.split('/').pop();
+  const title = card.title || doc.title || relPath.split('/').pop();
 
   if (!doc.isMarkdown) {
     const url = fileUrl('notes/' + relPath);
@@ -1364,7 +1522,7 @@ async function renderMobileDoc(relPath, epoch) {
   $('#m-rm-del').hidden = false;
   $('#btn-m-share').disabled = $('#btn-m-more').disabled = false;
 
-  const html = AtlasReader.render(doc, { names: nameIndex, assetUrl: fileUrl });
+  const html = articleHTML(doc);
   body.innerHTML = `
     <div class="reader-meta">
       ${badgeHTML(dirLabel)}
@@ -1376,13 +1534,12 @@ async function renderMobileDoc(relPath, epoch) {
       <input id="m-share-link" readonly style="width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px">
     </div>`;
   document.title = title + ' · Atlas';
-  $('#m-rm-revoke').hidden = !card.isShared;
   bindMobileDocLinks(body);
   if (pendingDocHeading?.path === relPath) {
     AtlasReader.scrollToHeading(body, pendingDocHeading.heading);
     pendingDocHeading = null;
   }
-  pushRecent(card);
+  pushRecent({ ...card, relPath, title });
 
   // 分享：与桌面端同一接口，状态回写卡片
   const shareEndpoint = '/api/share?path=' + encodeURIComponent(relPath);
@@ -1394,25 +1551,41 @@ async function renderMobileDoc(relPath, epoch) {
     const current = allCards.find(c => c.relPath === relPath);
     if (current) current.isShared = !!url;
     renderSidebar();
-    $('#m-rm-revoke').hidden = !url;
+    // 顶栏按钮双状态：未分享=分享图标，已分享=高亮对勾
+    const btn = $('#btn-m-share');
+    btn.classList.toggle('shared', !!url);
+    btn.title = url ? '已分享 · 点击取消' : '分享';
+    btn.setAttribute('aria-label', url ? '取消分享' : '分享');
+    const path = body.querySelector('.r-path');
+    if (path) path.textContent = `${dirLabel} · ${fmtDate(card.mtime || doc.mtime)}${url ? ' · 已分享' : ''}`;
   };
   fetch(shareEndpoint).then(r => r.json()).then(result => { if (mounted()) showShare(result.url); })
     .catch(() => { if (mounted()) toast('分享状态加载失败，请重试'); });
+
+  // 顶栏分享按钮：未分享→创建并复制；已分享→取消分享（二段式确认）
   mShareAction = async () => {
+    if (mRevokeArmed) {                    // 二次点击：确认取消
+      forceCloseRmenu();
+      mRevokeArmed = false;
+      return mRevokeAction();
+    }
+    if (shareUrl) {                        // 已分享：进入取消确认态
+      mRevokeArmed = true;
+      toast('再次点击确认取消分享');
+      setTimeout(() => { mRevokeArmed = false; }, 4000);
+      return;
+    }
     try {
-      if (!shareUrl) {
-        const resp = await fetch(shareEndpoint, { method: 'POST' });
-        const result = await resp.json();
-        if (!mounted()) return;
-        if (!resp.ok) throw Error(result.error);
-        showShare(result.url);
-      }
+      const resp = await fetch(shareEndpoint, { method: 'POST' });
+      const result = await resp.json();
       if (!mounted()) return;
+      if (!resp.ok) throw Error(result.error);
+      showShare(result.url);
       const box = $('#m-share-result');
       box.hidden = false;
       $('#m-share-link').value = new URL(shareUrl, location.origin).href;
-      try { await navigator.clipboard.writeText($('#m-share-link').value); toast('链接已复制'); }
-      catch { $('#m-share-link').select(); toast('请长按复制下方链接'); }
+      try { await navigator.clipboard.writeText($('#m-share-link').value); toast('已开启分享，链接已复制'); }
+      catch { $('#m-share-link').select(); toast('已开启分享，请长按复制链接'); }
     } catch (e) { if (mounted()) toast(e.message); }
   };
   // 复制分享链接：已有链接直接复制，没有则先生成
@@ -1482,7 +1655,7 @@ async function renderMobileDoc(relPath, epoch) {
   };
 }
 let mShareAction = null, mEditAction = null, mDeleteAction = null, mRevokeAction = null, mCopyAction = null;
-let mDeleteArmed = false;
+let mDeleteArmed = false, mRevokeArmed = false;
 let mDeleteTimer = null;
 const mDeleteBtn = document.getElementById('m-rm-del');
 function bindMobileDocLinks(scope) {
@@ -1663,6 +1836,7 @@ async function renderSearch(q, epoch = ++viewEpoch) {
   target.querySelectorAll('.result').forEach(el => {
     el.onclick = () => setRoute('doc', el.dataset.rel);
   });
+  if (isMobile()) target.scrollTop = restoreMobileFeed ? mobileFeedScroll : 0;
 }
 
 /* ============ 空态 ============ */
@@ -1697,9 +1871,30 @@ function renderView() {
     return;
   }
   clearEditor();
+  const nextRoute = parseHash();
+  const changed = acceptedHash !== location.hash;
+  let nextEntry = history.state?.atlasEntry;
+  if (!nextEntry) {
+    nextEntry = `${Date.now()}-${++mobileHistorySequence}`;
+    history.replaceState({ ...history.state, atlasEntry: nextEntry }, '', location.href);
+  }
+  restoreMobileFeed = route.view === 'doc' && nextRoute.view === mobileReturnRoute.view && nextRoute.param === mobileReturnRoute.param;
+  if (isMobile() && (changed || !mobileReaderTrail.length)) {
+    if (nextRoute.view === 'doc') {
+      if (route.view !== 'doc') {
+        mobileReturnRoute = { ...route };
+        mobileFeedScroll = $('#m-scroll').scrollTop;
+        mobileReaderTrail = [{ ...route, native: changed, entry: mobileHistoryEntry }];
+      } else {
+        const index = mobileReaderTrail.findLastIndex(item => item.entry === nextEntry);
+        if (index >= 0) mobileReaderTrail = mobileReaderTrail.slice(0, index);
+        else if (changed) mobileReaderTrail.push({ ...route, native: true, entry: mobileHistoryEntry });
+      }
+    } else mobileReaderTrail = [];
+  }
   acceptedHash = location.hash;
-  if (route.view !== 'doc') mobileReturnRoute = { ...route };
-  route = parseHash();
+  mobileHistoryEntry = nextEntry;
+  route = nextRoute;
   if (route.view !== 'doc') {
     $('#m-reader-shell').classList.remove('on');
     forceCloseRmenu();
@@ -1821,58 +2016,84 @@ function syncToTop() {
 bindToTop($('#m-totop-feed'), $('#m-scroll'));
 bindToTop($('#m-totop-reader'), $('#m-reader-body'));
 
-/* ---- 左缘右滑返回：仅左缘 24px 内起手，横向位移需明显大于纵向 ---- */
-const SWIPE_EDGE = 24, SWIPE_TRIGGER = 88, SWIPE_MAX = 0.82;
-function bindSwipeBack(el, onBack) {
-  let x0 = 0, y0 = 0, dx = 0, active = false, decided = false, horiz = false;
-  const base = () => el.getBoundingClientRect().left;
-  const width = () => el.offsetWidth || window.innerWidth;
-  const setX = (x, animate) => {
-    el.classList.toggle('swipe-done', !!animate);
-    el.style.transform = x > 0 ? `translateX(${x}px)` : '';
-    el.style.opacity = x > 0 ? String(1 - (x / width()) * 0.18) : '';
+/* ---- 手机返回手势：候选 → 横向拖动 → 回弹/完成，取消永不导航 ---- */
+function bindSwipeBack(el, onBack, options = {}) {
+  const direction = options.direction === 'left' ? -1 : 1;
+  let gesture = null, timer = null, suppressClickUntil = 0;
+  const available = () => isMobile() && el.classList.contains(options.openClass || 'on') && (!options.canStart || options.canStart());
+  const reset = () => {
+    clearTimeout(timer); timer = null; gesture = null;
+    suppressClickUntil = 0;
+    el.classList.remove('is-swiping', 'swipe-settling');
+    el.style.removeProperty('transform');
+    el.style.removeProperty('opacity');
   };
-  el.addEventListener('touchstart', e => {
-    const t = e.touches[0];
-    if (!t) return;
-    const localX = t.clientX - base();
-    if (localX > SWIPE_EDGE) return;          // 必须从左缘起手
-    x0 = localX; y0 = t.clientY; dx = 0;
-    active = true; decided = false; horiz = false;
-  }, { passive: true });
-  el.addEventListener('touchmove', e => {
-    if (!active) return;
-    const t = e.touches[0];
-    const mx = (t.clientX - base()) - x0, my = t.clientY - y0;
-    if (!decided) {
-      if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
-      horiz = Math.abs(mx) > Math.abs(my) * 1.4;
-      decided = true;
-      el.classList.add('swiping');
-    }
-    if (!horiz) { active = false; return; }
-    if (mx <= 0) { setX(0); return; }
-    dx = Math.min(mx, width() * SWIPE_MAX);
-    setX(dx);
-  }, { passive: true });
-  const finish = () => {
-    if (!active) return;
-    active = false;
-    el.classList.remove('swiping');
-    if (horiz && dx >= SWIPE_TRIGGER) {
-      setX(width(), true);
-      setTimeout(() => { setX(0, false); onBack(); }, 200);
-    } else {
-      setX(0, true);
-    }
-    dx = 0; horiz = false;
+  const draw = distance => {
+    el.style.transform = `translateX(${direction * distance}px)`;
   };
-  el.addEventListener('touchend', finish, { passive: true });
-  el.addEventListener('touchcancel', finish, { passive: true });
+  const settle = complete => {
+    const current = gesture;
+    if (!current || current.phase === 'settling') return;
+    current.phase = 'settling';
+    suppressClickUntil = Date.now() + 350;
+    el.classList.remove('is-swiping');
+    el.classList.add('swipe-settling');
+    draw(complete ? current.width : 0);
+    const duration = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    timer = setTimeout(() => {
+      const valid = available() && acceptedHash === current.hash;
+      reset();
+      if (complete && valid) onBack();
+    }, duration);
+  };
+  el.addEventListener('touchstart', event => {
+    if (gesture || !available() || event.touches.length !== 1) { reset(); return; }
+    const touch = event.touches[0], rect = el.getBoundingClientRect();
+    const localX = touch.clientX - rect.left;
+    if (options.edge !== false && (localX < 0 || localX > 24)) return;
+    if (event.target.closest('input,textarea,select,video,[contenteditable="true"]') || (!options.allowControls && event.target.closest('button,a'))) return;
+    gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY,
+      width: rect.width || window.innerWidth, distance: 0, phase: 'pending', hash: acceptedHash };
+  }, { passive: true });
+  el.addEventListener('touchmove', event => {
+    if (!gesture || gesture.phase === 'settling') return;
+    if (event.touches.length !== 1 || !available() || acceptedHash !== gesture.hash) { reset(); return; }
+    const touch = [...event.touches].find(item => item.identifier === gesture.id);
+    if (!touch) { reset(); return; }
+    const dx = direction * (touch.clientX - gesture.x), dy = Math.abs(touch.clientY - gesture.y);
+    if (gesture.phase === 'pending') {
+      if (Math.max(Math.abs(dx), dy) < 10) return;
+      if (dx <= 0 || dx < dy * 1.5 || !event.cancelable) { reset(); return; }
+      gesture.phase = 'dragging';
+      el.classList.add('is-swiping');
+    }
+    if (!event.cancelable) { reset(); return; }
+    event.preventDefault();
+    gesture.distance = Math.min(Math.max(0, dx), gesture.width);
+    draw(gesture.distance);
+  }, { passive: false });
+  el.addEventListener('touchend', event => {
+    if (!gesture || gesture.phase === 'settling') return;
+    const touch = [...event.changedTouches].find(item => item.identifier === gesture.id);
+    if (!touch) return;
+    if (gesture.phase !== 'dragging') { reset(); return; }
+    const dx = direction * (touch.clientX - gesture.x);
+    const threshold = Math.min(120, Math.max(64, gesture.width * .25));
+    settle(dx >= threshold && Math.abs(touch.clientY - gesture.y) < dx / 1.5);
+  }, { passive: true });
+  el.addEventListener('touchcancel', reset, { passive: true });
+  el.addEventListener('click', event => {
+    if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
+  for (const event of ['resize', 'blur', 'pagehide', 'hashchange']) window.addEventListener(event, reset);
+  document.addEventListener('visibilitychange', reset);
+  return reset;
 }
-bindSwipeBack($('#m-reader-shell'), mCloseReader);
+bindSwipeBack($('#m-reader-shell'), mCloseReader, {
+  canStart: () => !editState && !$('#m-mepage').classList.contains('on') && !$('#m-rmenu').classList.contains('on'),
+});
 bindSwipeBack($('#m-mepage'), () => $('#m-mepage').classList.remove('on'));
-bindSwipeBack($('#sidebar'), () => toggleSidebar(false));
+bindSwipeBack($('#sidebar'), () => toggleSidebar(false), { direction: 'left', edge: false, allowControls: true, openClass: 'is-open' });
 
 /* ---- 底栏 ---- */
 $('#m-tabbar').querySelectorAll('.m-item').forEach(btn => {
@@ -1886,6 +2107,27 @@ $('#m-tabbar').querySelectorAll('.m-item').forEach(btn => {
   };
 });
 $('#btn-nav-search').onclick = () => { $('#m-searchpane').classList.add('on'); openMask(); setTimeout(() => $('#m-search-input').focus(), 60); };
+/* 手动刷新：丢弃页面内缓存 → 重新拉取卡片与目录树 → 按当前路由重渲染 */
+$('#btn-nav-refresh').onclick = async () => {
+  const btn = $('#btn-nav-refresh');
+  if (btn.disabled || !canLeaveEditor()) return;
+  btn.disabled = true; btn.classList.add('on');
+  try {
+    clearViewCaches();
+    await Promise.all([loadCards(), loadTree()]);
+    renderView();
+    toast('已刷新');
+  } catch (error) {
+    toast(error.message || '刷新失败，请重试');
+  } finally {
+    btn.disabled = false; btn.classList.remove('on');
+  }
+};
+/* 列宽变化（旋转屏幕/窗口缩放）后重排瀑布流 */
+window.addEventListener('resize', () => {
+  const grid = $('#m-scroll .m-masonry');
+  if (grid && grid.masonry) scheduleMasonry(grid);
+});
 $('#m-search-cancel').onclick = closeAllOverlays;
 $('#m-mask').onclick = closeAllOverlays;
 $('#btn-m-back').onclick = mCloseReader;
@@ -1895,7 +2137,6 @@ $('#m-rmenu').onclick = e => e.stopPropagation();
 document.addEventListener('click', () => closeRmenu());
 $('#m-rm-edit').onclick = () => mEditAction?.();
 $('#m-rm-copy').onclick = () => mCopyAction?.();
-$('#m-rm-revoke').onclick = () => mRevokeAction?.();
 $('#m-rm-del').onclick = () => mDeleteAction?.();
 
 /* 移动端搜索输入 */
@@ -1960,6 +2201,9 @@ function renderMe() {
         <div class="nm">${esc(mAuth.username || '未登录')}</div>
         <div class="sub2">${esc(mAuth.sessionText)}</div>
       </div>
+      <button class="m-logout" data-act="logout" aria-label="退出登录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2"/><path d="M10 12h10M17 9l3 3-3 3"/></svg>
+      </button>
     </div>
     <div class="m-grp">统计</div>
     <div class="m-grid3">
@@ -1973,30 +2217,17 @@ function renderMe() {
       <div class="m-stat"><b>${allCards.filter(c => !c.isMarkdown).length}</b><span>非MD</span></div>
     </div>
     <div class="m-grp">最近浏览</div>
-    ${recent.length ? recent.map(r => `<button class="m-it" data-rel="${esc(r.relPath)}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title)}</span><span class="ct">${fmtDate(r.at)}</span></button>`).join('') : '<div class="m-empty">暂无浏览记录</div>'}
-    <div class="m-grp">操作</div>
-    <button class="m-it" data-act="create">新建笔记<span class="ct">＋</span></button>
-    <button class="m-it" data-act="random">随机打开一篇<span class="ct">↝</span></button>
-    <button class="m-it" data-act="top">回到顶部<span class="ct">↑</span></button>
-    <button class="m-it danger" data-act="logout">退出登录<span class="ct">⏻</span></button>`;
+    ${recent.length ? recent.map(r => `<button class="m-it" data-rel="${esc(r.relPath)}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title)}</span><span class="ct">${fmtDate(r.at)}</span></button>`).join('') : '<div class="m-empty">暂无浏览记录</div>'}`;
   host.querySelectorAll('.m-it[data-rel]').forEach(b => {
     b.onclick = () => { $('#m-mepage').classList.remove('on'); setRoute('doc', b.dataset.rel); };
   });
-  host.querySelectorAll('.m-it[data-act]').forEach(b => {
-    b.onclick = async () => {
-      const act = b.dataset.act;
-      $('#m-mepage').classList.remove('on');
-      if (act === 'create') createDoc();
-      else if (act === 'random') openRandomDoc();
-      else if (act === 'top') $('#m-scroll').scrollTo({ top: 0, behavior: 'smooth' });
-      else if (act === 'logout') {
-        if (!confirm('确定退出登录？')) { openMe(); return; }
-        await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        clearEditor();
-        location.replace('/login');
-      }
-    };
-  });
+  const logoutBtn = host.querySelector('[data-act="logout"]');
+  if (logoutBtn) logoutBtn.onclick = async () => {
+    if (!confirm('确定退出登录？')) return;
+    await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    clearEditor();
+    location.replace('/login');
+  };
 }
 /* 登录态（读 /auth/status，含 username 与会话过期时间） */
 const mAuth = { username: null, expiresAt: null, sessionText: '' };
@@ -2019,7 +2250,14 @@ async function loadAuth() {
 /* ============ 启动 ============ */
 (async function init() {
   renderTarget().innerHTML = emptyState('正在加载笔记…');
-  try { await Promise.all([loadCards(), loadTree()]); renderView(); }
+  const directDoc = parseHash().view === 'doc';
+  try {
+    const data = Promise.all([loadCards(), loadTree()]);
+    if (directDoc) renderView();
+    await data;
+    if ((directDoc && route.view === 'doc') || editState) renderSidebar();
+    else renderView();
+  }
   catch (error) { showViewError(error); }
   if (isMobile()) loadAuth();
 })();

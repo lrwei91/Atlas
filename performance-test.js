@@ -15,8 +15,9 @@ const { performance } = require('node:perf_hooks');
   const state = path.join(tmp, 'state');
   fs.mkdirSync(notes, { recursive: true });
   fs.mkdirSync(path.join(vault, 'resources', 'nested'), { recursive: true });
+  const inlineCover = process.env.ATLAS_BENCH_COVERS ? '---\n![封面](data:image/jpeg;base64,' + Buffer.alloc(48 * 1024, 255).toString('base64') + ')\n---\n' : '';
   for (let i = 0; i < 500; i++) {
-    fs.writeFileSync(path.join(notes, `note-${i}.md`), `# Note ${i}\n\n` + 'Atlas performance searchable content.\n'.repeat(250));
+    fs.writeFileSync(path.join(notes, `note-${i}.md`), (i < 260 ? inlineCover : '') + `# Note ${i}\n\n` + 'Atlas performance searchable content.\n'.repeat(250));
     fs.writeFileSync(path.join(vault, 'resources', 'nested', `image-${i}.png`), 'fixture');
   }
   fs.writeFileSync(path.join(notes, 'direct.md'), '# Direct\n![](../resources/nested/image-0.png)');
@@ -57,6 +58,7 @@ const { performance } = require('node:perf_hooks');
       medians[label] = Number(samples[4].toFixed(2));
     }
     console.log('Median local HTTP ms (502 notes, 500 images):', JSON.stringify(medians));
+    if (inlineCover) console.log('Cards JSON bytes (260 embedded covers):', Buffer.byteLength(JSON.stringify(await get('/api/cards'))));
 
     // Repeated requests must still observe Obsidian edits and atomic replacements.
     const target = path.join(notes, 'note-0.md');
@@ -91,7 +93,14 @@ const { performance } = require('node:perf_hooks');
 
     // Fallback uniqueness and share allowlists must not be cached across asset edits.
     assert.equal((await get('/api/doc?path=fallback.md')).assets['image-0.png'], 'resources/nested/image-0.png');
+    const beforeAsset = await fetch(base + '/api/doc?path=fallback.md', { headers: { Cookie: cookie } });
+    const assetTag = beforeAsset.headers.get('etag'); await beforeAsset.text();
     fs.writeFileSync(path.join(vault, 'resources', 'image-0.png'), 'direct fixture');
+    if (assetTag) {
+      const changed = await fetch(base + '/api/doc?path=fallback.md', { headers: { Cookie: cookie, 'If-None-Match': assetTag } });
+      assert.equal(changed.status, 200, 'asset resolution changes must invalidate document validators');
+      assert.equal((await changed.json()).assets['image-0.png'], 'resources/image-0.png');
+    }
     assert.equal((await get('/api/doc?path=fallback.md')).assets['image-0.png'], 'resources/image-0.png');
     fs.unlinkSync(path.join(vault, 'resources', 'image-0.png'));
     fs.mkdirSync(path.join(vault, 'resources', 'duplicate'));

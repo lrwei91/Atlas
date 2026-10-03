@@ -71,16 +71,19 @@ module.exports = function(vault, safeResolve, noteCache = require('./note-cache'
     const entry = noteCache.read(full, st);
     const content = entry.content;
     const version = entry.version || (entry.version = versionOf(content));
-    const html = marked.parse(reader.prepare(content));
-    let sources = [];
-    let hrefs = [];
+    let { sources, hrefs } = entry.parsed || { sources: [], hrefs: [] };
     // Most notes contain no media; avoid constructing a DOM for those notes.
-    if (/<(?:img|video|a)[\s>]/i.test(html)) {
-      const dom = new JSDOM(html);
-      try {
-        hrefs = [...new Set([...dom.window.document.querySelectorAll('a[href]')].map(el => el.getAttribute('href')))];
-        sources = [...new Set([...dom.window.document.querySelectorAll('img,video,video source')].flatMap(el => [el.getAttribute('src'), el.tagName === 'VIDEO' ? el.getAttribute('poster') : null]).filter(Boolean))];
-      } finally { dom.window.close(); }
+    if (!entry.parsed) {
+      const html = marked.parse(reader.prepare(content));
+      if (/<(?:img|video|a)[\s>]/i.test(html)) {
+        const dom = new JSDOM(html);
+        try {
+          hrefs = [...new Set([...dom.window.document.querySelectorAll('a[href]')].map(el => el.getAttribute('href')))];
+          sources = [...new Set([...dom.window.document.querySelectorAll('img,video,video source')].flatMap(el => [el.getAttribute('src'), el.tagName === 'VIDEO' ? el.getAttribute('poster') : null]).filter(Boolean))];
+        } finally { dom.window.close(); }
+      }
+      // Cache syntax only; resolve paths and share allowlists against live files.
+      entry.parsed = { sources, hrefs };
     }
     let index;
     const getIndex = () => {

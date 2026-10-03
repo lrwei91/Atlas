@@ -73,6 +73,7 @@ async function serverTests() {
     const inlineCover = 'data:image/jpeg;base64,/9j/2Q==';
     fs.writeFileSync(path.join(vault, 'resources', 'body.png'), Buffer.from('image'));
     const coverNotes = {
+      '00-notes-index.md': '# Notes Index\nIndex remains readable.',
       'cover.md': `---\n![封面](${inlineCover})\n---\n# 封面测试\n这是应当显示的正文摘要。\n![](resources/body.png)`,
       'cover-crlf.md': `\uFEFF---\r\n![封面](${inlineCover})\r\n...\r\n# Cover`,
       'cover-body.md': '# Body\n![](resources/body.png)\n---\nLater\n---',
@@ -82,13 +83,32 @@ async function serverTests() {
     for (const [name, text] of Object.entries(coverNotes)) fs.writeFileSync(path.join(vault, 'notes', name), text);
     const coverCards = (await (await fetch(base + '/api/cards', { headers: headers() })).json()).cards;
     const coverCard = name => coverCards.find(card => card.relPath === name);
-    assert.equal(coverCard('cover.md').cover, inlineCover);
+    assert.equal(coverCard('00-notes-index.md'), undefined);
+    const indexDoc = await (await fetch(base + '/api/doc?path=00-notes-index.md', { headers: headers() })).json();
+    assert.match(indexDoc.content, /Notes Index/);
+    assert.equal(coverCard('cover.md').cover, '/api/cover?path=cover.md');
     assert.equal(coverCard('cover.md').excerpt, '这是应当显示的正文摘要。');
     assert.equal(coverCard('cover.md').chars, require('./public/reader').body(coverNotes['cover.md']).length);
-    assert.equal(coverCard('cover-crlf.md').cover, inlineCover);
+    assert.equal(coverCard('cover-crlf.md').cover, '/api/cover?path=cover-crlf.md');
+    const image = await fetch(base + coverCard('cover.md').cover, { headers: headers() });
+    assert.equal(image.headers.get('content-type'), 'image/jpeg');
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from('/9j/2Q==', 'base64'));
+    const tag = image.headers.get('etag');
+    const cachedImage = await fetch(base + coverCard('cover.md').cover, { headers: { ...headers(), 'If-None-Match': tag } });
+    assert.equal(cachedImage.status, 304); assert.equal(cachedImage.headers.get('content-length'), null);
+    assert.equal((await cachedImage.text()), '');
+    assert.equal((await fetch(base + coverCard('cover.md').cover, { headers: { 'If-None-Match': tag } })).status, 401);
+    fs.writeFileSync(path.join(vault, 'notes', 'cover.md'), '---\n![封面](data:image/png;base64,aW1hZ2U=)\n---\n# Changed');
+    const changedCover = await fetch(base + coverCard('cover.md').cover, { headers: { ...headers(), 'If-None-Match': tag } });
+    assert.equal(changedCover.status, 200); assert.equal(changedCover.headers.get('content-type'), 'image/png');
+    assert.equal(await changedCover.text(), 'image');
+    fs.writeFileSync(path.join(vault, 'notes', 'cover.md'), '# No cover');
+    assert.equal((await fetch(base + coverCard('cover.md').cover, { headers: headers() })).status, 404);
     assert.equal(coverCard('cover-body.md').cover, '/files/resources/body.png');
     assert.equal(coverCard('cover-unsafe.md').cover, '/files/resources/body.png');
     assert.equal(coverCard('cover-percent.md').cover, null);
+    const binaryHits = await (await fetch(base + '/api/search?q=' + encodeURIComponent('/9j/2Q'), { headers: headers() })).json();
+    assert.equal(binaryHits.results.length, 0, 'image Base64 must not pollute text search');
     for (const name of Object.keys(coverNotes)) fs.unlinkSync(path.join(vault, 'notes', name));
     console.log('PASS: frontmatter inline covers, body fallback, safe image types, metadata-free excerpts');
     const readBody = require('./request-body');
@@ -270,10 +290,10 @@ async function mobileFrontendTests() {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window, errors = [], mediaListeners = [];
   const media = { matches: true, addEventListener: (_, fn) => mediaListeners.push(fn) };
-  w.matchMedia = () => media;
+  w.matchMedia = query => query.includes('max-width') ? media : { matches: false };
   w.confirm = () => false;
   w.HTMLElement.prototype.scrollTo = function() { this.scrollTop = 0; };
-  const cards = [{ relPath: 'Work/A.md', title: 'A', isMarkdown: true, dir: 'Work', excerpt: 'Original body', chars: 50, mtime: Date.now() },
+  const cards = [{ relPath: 'Work/A.md', title: 'A', isMarkdown: true, isShared: false, dir: 'Work', excerpt: 'Original body', chars: 50, mtime: Date.now() },
     { relPath: 'file.pdf', title: 'file.pdf', isMarkdown: false, dir: '', excerpt: '', size: 12, mtime: Date.now() }];
   const calls = [];
   w.addEventListener('error', e => { errors.push(e.message); e.preventDefault(); });
@@ -290,18 +310,81 @@ async function mobileFrontendTests() {
     return { status: 200, ok: true, json: async () => body };
   };
   const $ = selector => w.document.querySelector(selector);
+  const touch = (target, type, x, y = 100, extra = {}) => {
+    const point = { identifier: 1, clientX: x, clientY: y };
+    const event = new w.Event(type, { bubbles: true, cancelable: type === 'touchmove' });
+    Object.defineProperties(event, {
+      touches: { value: type === 'touchend' || type === 'touchcancel' ? [] : [point], configurable: true },
+      changedTouches: { value: [point], configurable: true },
+    });
+    for (const [key, value] of Object.entries(extra)) Object.defineProperty(event, key, { value });
+    target.dispatchEvent(event); return event;
+  };
   try {
     for (const file of ['vendor/marked.min.js', 'reader.js']) w.eval(fs.readFileSync(path.join(__dirname, 'public', file), 'utf8'));
     w.eval(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
     await waitFor(() => $('#m-scroll .card'));
     $('#btn-nav').click(); assert.equal($('#m-mask').classList.contains('on'), true);
-    $('#btn-nav-close').click(); assert.equal($('#m-mask').classList.contains('on'), false);
+    // 侧栏由遮罩或向左滑动关闭。
+    assert.equal($('#btn-nav-close'), null);
+    $('#m-mask').click(); assert.equal($('#m-mask').classList.contains('on'), false);
+    $('#btn-nav').click();
+    touch($('#sidebar'), 'touchstart', 200);
+    touch($('#sidebar'), 'touchmove', 30); touch($('#sidebar'), 'touchend', 30);
+    await pause(200); assert.equal($('#sidebar').classList.contains('is-open'), false);
+    assert.equal($('#m-mask').classList.contains('on'), false);
     w.setRoute('dir', 'Work'); await pause(20);
+    const retainedMobileCard = $('#m-scroll .card');
     $('#m-scroll .card').click(); await waitFor(() => $('#m-reader-body .article'));
     $('#btn-m-back').click(); await waitFor(() => w.parseHash().view === 'dir');
+    await pause(20);
     assert.equal(w.parseHash().param, 'Work');
+    assert.equal($('#m-scroll .card'), retainedMobileCard, 'reader return must retain mobile card DOM');
+    $('#m-scroll').scrollTop = 220;
     $('#m-scroll .card').click(); await pause(20); await waitFor(() => $('#m-reader-shell').classList.contains('on'));
     await waitFor(() => !$('#btn-m-more').disabled);
+    const panel = $('#m-reader-shell');
+    panel.getBoundingClientRect = () => ({ left: Number((panel.style.transform.match(/translateX\(([-\d.]+)px\)/) || [0, 0])[1]), width: 390 });
+    touch($('#m-reader-body'), 'touchstart', 5);
+    assert.equal(touch($('#m-reader-body'), 'touchmove', 8, 160).defaultPrevented, false);
+    touch($('#m-reader-body'), 'touchend', 180, 160);
+    assert.equal(panel.style.transform, ''); assert.equal(w.parseHash().view, 'doc');
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 80);
+    touch($('#m-reader-body'), 'touchmove', 145);
+    assert.equal(panel.style.transform, 'translateX(140px)', 'gesture origin must stay fixed while panel moves');
+    touch($('#m-reader-body'), 'touchcancel', 180); await pause(200);
+    assert.equal(w.parseHash().view, 'doc'); assert.equal(panel.style.transform, '');
+    assert.equal(panel.classList.contains('is-swiping'), false);
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 145);
+    touch($('#m-reader-body'), 'touchmove', 165, 100, { touches: [{ identifier: 1, clientX: 165, clientY: 100 }, { identifier: 2, clientX: 180, clientY: 100 }] });
+    touch($('#m-reader-body'), 'touchend', 165);
+    assert.equal(panel.style.transform, ''); assert.equal(w.parseHash().view, 'doc');
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 145);
+    w.dispatchEvent(new w.Event('resize'));
+    touch($('#m-reader-body'), 'touchend', 165);
+    assert.equal(panel.style.transform, ''); assert.equal(w.parseHash().view, 'doc');
+    touch($('#m-reader-body'), 'touchstart', 80);
+    touch($('#m-reader-body'), 'touchmove', 230); touch($('#m-reader-body'), 'touchend', 230);
+    assert.equal(w.parseHash().view, 'doc', 'non-edge gesture must not navigate');
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 50); touch($('#m-reader-body'), 'touchend', 50);
+    await pause(200); assert.equal(w.parseHash().view, 'doc'); assert.equal(panel.style.transform, '');
+    // A → B → swipe returns to A, then returns to the same list scroll position.
+    w.setRoute('doc', 'Work/B.md'); await pause(20);
+    // Linking back to A creates a new visit; it must still return to B first.
+    w.setRoute('doc', 'Work/A.md'); await pause(20);
+    $('#btn-m-back').click(); await pause(30); assert.equal(w.parseHash().param, 'Work/B.md');
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 165); touch($('#m-reader-body'), 'touchend', 165);
+    await pause(220); assert.equal(w.parseHash().param, 'Work/A.md');
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 165); touch($('#m-reader-body'), 'touchend', 165);
+    await pause(220); assert.equal(w.parseHash().view, 'dir');
+    assert.equal($('#m-scroll').scrollTop, 220);
+    $('#m-scroll .card').click(); await pause(20);
     $('#btn-m-more').click(); $('#m-rm-del').click();
     assert.equal($('#m-rmenu').classList.contains('on'), true);
     assert.equal($('#m-rm-del').classList.contains('armed'), true);
@@ -312,6 +395,9 @@ async function mobileFrontendTests() {
     $('#btn-m-more').click(); $('#m-rm-edit').click();
     const editor = $('#editor-m'); assert.ok(editor);
     editor.value += '\nUnsaved draft';
+    touch($('#m-reader-body'), 'touchstart', 5);
+    touch($('#m-reader-body'), 'touchmove', 165); touch($('#m-reader-body'), 'touchend', 165);
+    await pause(200); assert.equal(panel.style.transform, ''); assert.equal($('#editor-m'), editor);
     media.matches = false; mediaListeners.forEach(fn => fn());
     assert.equal($('#main #editor-m'), editor); assert.match(editor.value, /Unsaved draft/);
     media.matches = true; mediaListeners.forEach(fn => fn());
@@ -326,17 +412,52 @@ async function mobileFrontendTests() {
     $('#btn-m-back').click(); await pause(20);
     media.matches = false; mediaListeners.forEach(fn => fn());
     assert.equal($('#m-root').hasAttribute('hidden-m'), true);
-    assert.equal($('.m-drawer-brand').hasAttribute('hidden-m'), true);
+    assert.equal($('#m-brand').hasAttribute('hidden-m'), true);
     media.matches = true; mediaListeners.forEach(fn => fn());
     assert.equal($('#m-root').hasAttribute('hidden-m'), false);
+    assert.equal($('#m-brand').hasAttribute('hidden-m'), false);
     assert.ok($('#m-scroll .card'));
     w.setRoute('search', '不存在的笔记'); await pause(20);
     assert.equal($('#m-title').textContent, '搜索');
     assert.match($('#m-sub').textContent, /0 篇命中/);
     assert.equal($('#m-chips').style.display, 'none');
     assert.match($('#m-scroll').textContent, /没有找到/);
+    // 顶栏中间品牌、侧栏无关闭按钮与品牌区
+    assert.equal($('#m-brand').textContent, 'Atlas');
+    assert.equal($('.m-drawer-brand'), null);
+    assert.equal($('#btn-nav-close'), null);
+    // 详情页：顶栏无标题，分享按钮双状态，更多菜单不含取消分享
+    assert.equal($('.m-reader-shell .rbar .t'), null);
+    assert.equal($('#m-rm-revoke'), null);
+    // 我的页：退出登录在账户卡内，操作分组已移除
+    w.setRoute('all'); await pause(20);
+    w.openMe(); await pause(20);
+    assert.ok($('#m-me-body .m-profile .m-logout'), '退出登录应在账户卡内');
+    assert.equal($('#m-me-body [data-act="create"]'), null, '操作分组应已移除');
+    assert.equal($('#m-me-body [data-act="random"]'), null);
+    assert.equal($('#m-me-body .m-grp:last-of-type').textContent.trim(), '最近浏览');
+    touch($('#m-me-body'), 'touchstart', 5);
+    touch($('#m-me-body'), 'touchmove', 220); touch($('#m-me-body'), 'touchend', 220);
+    await pause(200); assert.equal($('#m-mepage').classList.contains('on'), false);
+    // 双列瀑布流：按列表顺序最短列贪心，首屏先左右分列（而非左列从上堆到底）
+    const grid = $('#m-scroll .m-masonry');
+    const masonryCards = grid.masonry;
+    assert.equal(masonryCards.length, 2);
+    masonryCards.forEach((card, i) => Object.defineProperty(card, 'offsetHeight', { value: i === 0 ? 300 : 100, configurable: true }));
+    w.layoutMasonry(grid, masonryCards);
+    assert.equal(grid.children[0].children[0], masonryCards[0]);
+    assert.equal(grid.children[1].children[0], masonryCards[1], '第二张应进右列');
+    // 刷新按钮：点击后重新拉取卡片，结束后恢复可点
+    const refreshBtn = $('#btn-nav-refresh');
+    const cardCallsBefore = calls.filter(call => call.url === '/api/cards').length;
+    refreshBtn.click();
+    assert.equal(refreshBtn.classList.contains('on'), true, '刷新中按钮应显示加载态');
+    assert.equal(refreshBtn.disabled, true);
+    await waitFor(() => !refreshBtn.disabled);
+    assert.ok(calls.filter(call => call.url === '/api/cards').length > cardCallsBefore);
+    assert.equal(refreshBtn.classList.contains('on'), false);
     assert.deepEqual(errors, []);
-    console.log('PASS: mobile drawer, reader return/reopen, delete disarm, dirty back guard, PDF actions, breakpoint roundtrip');
+    console.log('PASS: mobile swipe direction/origin/cancel/multitouch/resize/editor, navigation trail and scroll restore, drawer/me, dirty back, PDF, breakpoint, topbar/share');
   } finally { dom.window.close(); }
 }
 

@@ -50,7 +50,7 @@ const assert = require('node:assert/strict');
     doc.querySelector('#btn-share').click();
     await new Promise(r => setTimeout(r, 500));
     const shareURL = doc.querySelector('#share-link').value;
-    if (!shareURL.includes('/share/') || doc.querySelector('#share-result').hidden) errors.push('分享链接未显示');
+    if (!/\/s\/[A-Za-z0-9_-]{22}$/.test(shareURL) || doc.querySelector('#share-result').hidden) errors.push('分享链接未显示');
     doc.querySelector('#btn-revoke').click();
     await new Promise(r => setTimeout(r, 500));
     if (!doc.querySelector('#share-result').hidden || !doc.querySelector('#btn-revoke').hidden) errors.push('取消分享状态错误');

@@ -21,6 +21,7 @@ const shares = require('./shares');
 const readBody = require('./request-body');
 const versionOf = require('./document-version');
 const reader = require('./public/reader');
+const responses = require('./response-cache');
 
 const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/iCloud~md~obsidian/Documents/主库');
 const NOTES = path.join(VAULT, 'notes');
@@ -30,6 +31,7 @@ const noteCache = require('./note-cache')();
 const documents = require('./documents')(VAULT, safeResolve, noteCache);
 
 const IGNORE_FILES = new Set(['.DS_Store', '.obsidian', '.trash']);
+const EXCLUDED_CARD_PATHS = new Set(['00-notes-index.md']);
 const MIME = {
   '.md': 'text/markdown; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
@@ -162,6 +164,20 @@ function coverFrom(content, rel) {
   return null;
 }
 
+function cardDetails(entry, rel) {
+  if (!entry.card) {
+    const body = reader.body(entry.content);
+    const embedded = coverFrom(entry.content, rel);
+    entry.card = {
+      title: ((body.match(/^#\s+(.+)$/m) || [])[1] || path.basename(rel, '.md')).trim().slice(0, 80),
+      excerpt: excerptFrom(entry.content), chars: body.length,
+      embeddedCover: embedded?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : null,
+    };
+  }
+  const { embeddedCover, ...details } = entry.card;
+  return { ...details, cover: embeddedCover || coverFrom(entry.content, rel) };
+}
+
 /* ---------- API 实现 ---------- */
 
 function buildTree() {
@@ -191,6 +207,7 @@ function buildCards(dirFilter) {
   walk(NOTES, (full) => {
     liveFiles.add(full);
     const rel = relToNotes(full);
+    if (EXCLUDED_CARD_PATHS.has(rel)) return;
     if (dirFilter && !(rel + '/').startsWith(dirFilter.replace(/\/+$/, '') + '/')) return;
     const st = statOrNull(full);
     if (!st) return;
@@ -198,19 +215,15 @@ function buildCards(dirFilter) {
       cards.push({ relPath: rel, title: path.basename(rel), isMarkdown: false, mtime: st.mtimeMs, size: st.size, excerpt: '', dir: path.dirname(rel) === '.' ? '' : path.dirname(rel) });
       return;
     }
-    let content = '';
-    try { content = noteCache.read(full, st).content; } catch { return; }
-    const titleLine = (content.match(/^#\s+(.+)$/m) || [])[1];
+    let entry;
+    try { entry = noteCache.read(full, st); } catch { return; }
     cards.push({
       relPath: rel,
-      title: (titleLine || path.basename(rel, '.md')).trim().slice(0, 80),
       isMarkdown: true,
       mtime: st.mtimeMs,
       size: st.size,
-      excerpt: excerptFrom(content),
       dir: path.dirname(rel) === '.' ? '' : path.dirname(rel),
-      chars: reader.body(content).length,
-      cover: coverFrom(content, rel),
+      ...cardDetails(entry, rel),
     });
   });
   noteCache.prune(liveFiles);
@@ -227,7 +240,7 @@ function searchDocs(q) {
     const st = statOrNull(full);
     if (!st) return;
     let content, lower;
-    try { ({ content, lower } = noteCache.read(full, st)); } catch { return; }
+    try { const entry = noteCache.read(full, st); content = entry.searchContent; lower = entry.lower; } catch { return; }
     if (!terms.every((t) => lower.includes(t))) return;
     const titleLine = (content.match(/^#\s+(.+)$/m) || [])[1];
     const snippets = [];
@@ -257,9 +270,12 @@ function searchDocs(q) {
 /* ---------- HTTP ---------- */
 
 function sendJSON(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(body);
+  responses.json(res, code, obj);
+}
+function sendDocument(req, res, doc) {
+  const { content, ...metadata } = doc;
+  // version hashes the original content; resolved links/media are also live inputs.
+  responses.json(res, 200, doc, { validate: true, key: JSON.stringify(metadata) });
 }
 
 function sendFile(req, res, absPath) {
@@ -267,11 +283,26 @@ function sendFile(req, res, absPath) {
   if (!st || !st.isFile()) { res.writeHead(404); res.end('Not found'); return; }
   const headers = {
     'Content-Type': MIME[path.extname(absPath).toLowerCase()] || 'application/octet-stream',
-    'Content-Length': st.size, 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes',
+    'Content-Length': st.size, 'Cache-Control': 'private, no-cache', 'Accept-Ranges': 'bytes',
+    ETag: responses.etag(st),
   };
+  const staticText = absPath.startsWith(PUBLIC_DIR + path.sep) && st.size <= 2 * 1024 * 1024 && /\.(html|css|js|json)$/.test(absPath);
+  if (staticText) headers.Vary = 'Accept-Encoding';
+  // Weak validators cannot satisfy If-Range: return the complete current file.
+  const range = req.headers['if-range'] ? null : req.headers.range;
+  if (!range && ['GET', 'HEAD'].includes(req.method) && responses.fresh(req, headers.ETag)) {
+    delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return;
+  }
+  if (!range && staticText) {
+    const cached = responses.staticBody(absPath, st), gzip = responses.wantsGzip(req);
+    const body = gzip ? cached.gzip : cached.body;
+    headers.Vary = 'Accept-Encoding'; headers['Content-Length'] = body.length;
+    if (gzip) headers['Content-Encoding'] = 'gzip';
+    res.writeHead(200, headers); res.end(req.method === 'HEAD' ? undefined : body); return;
+  }
   let start = 0, end = st.size - 1, status = 200;
-  if (req.headers.range) {
-    const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
     if (match && (match[1] || match[2])) {
       if (!match[1]) { const count = Number(match[2]); start = Math.max(0, st.size - count); }
       else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
@@ -291,6 +322,7 @@ function sendFile(req, res, absPath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  res.atlasRequest = req;
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -307,14 +339,14 @@ const server = http.createServer(async (req, res) => {
     if (['/reader.js', '/vendor/marked.min.js', '/vendor/highlight.min.js', '/vendor/hl-theme.css'].includes(p) && req.method === 'GET') {
       sendFile(req, res, path.join(PUBLIC_DIR, p.slice(1))); return;
     }
-    if (p.startsWith('/share/')) {
+    if (p.startsWith('/share/') || p.startsWith('/s/')) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-      const match = /^\/share\/([a-f0-9]{64})(?:\/(doc|file))?\/?$/.exec(p);
+      const match = /^\/(?:share|s)\/([A-Za-z0-9_-]{22}|[a-f0-9]{64})(?:\/(doc|file))?\/?$/.exec(p);
       const share = match && shares.get(match[1]);
       const doc = share && documents.read(share.relPath);
       if (!doc || !['GET', 'HEAD'].includes(req.method)) { sendJSON(res, 404, { error: '分享不存在或已取消' }); return; }
       if (!match[2]) { sendFile(req, res, path.join(PUBLIC_DIR, 'share.html')); return; }
-      if (match[2] === 'doc') { sendJSON(res, 200, doc); return; }
+      if (match[2] === 'doc') { sendDocument(req, res, doc); return; }
       const asset = u.searchParams.get('path');
       const absolute = Object.values(doc.assets).includes(asset) ? safeResolve(VAULT, asset) : null;
       if (!absolute) { sendJSON(res, 404, { error: '图片不存在' }); return; }
@@ -326,6 +358,20 @@ const server = http.createServer(async (req, res) => {
       else { res.writeHead(302, { Location: '/login', 'Cache-Control': 'no-store' }); res.end(); }
       return;
     }
+    if (p === '/api/cover' && ['GET', 'HEAD'].includes(req.method)) {
+      const rel = u.searchParams.get('path') || '', full = safeResolve(NOTES, rel);
+      const st = full && statOrNull(full);
+      if (!st?.isFile() || path.extname(full).toLowerCase() !== '.md') { sendJSON(res, 404, { error: '封面不存在' }); return; }
+      const entry = noteCache.read(full, st);
+      const source = coverFrom(entry.content, rel);
+      const match = source?.match(/^data:(image\/(?:png|jpeg|gif|webp|avif|bmp));base64,(.+)$/);
+      if (!match) { sendJSON(res, 404, { error: '封面不存在' }); return; }
+      const headers = { 'Content-Type': match[1], 'Cache-Control': 'private, no-cache', ETag: responses.etag(st) };
+      if (responses.fresh(req, headers.ETag)) { res.writeHead(304, headers); res.end(); return; }
+      const body = responses.coverBody(full, st, match[2]);
+      headers['Content-Length'] = body.length;
+      res.writeHead(200, headers); res.end(req.method === 'HEAD' ? undefined : body); return;
+    }
     if (p === '/api/share') {
       const absolute = safeResolve(NOTES, u.searchParams.get('path') || '');
       const rel = absolute ? path.relative(fs.realpathSync(NOTES), absolute).split(path.sep).join('/') : '';
@@ -336,7 +382,7 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'DELETE') shares.revoke(rel); else shares.create(rel);
       } else if (req.method !== 'GET') { sendJSON(res, 405, { error: 'method not allowed' }); return; }
       const token = shares.find(rel);
-      sendJSON(res, 200, { url: token ? (process.env.ATLAS_PUBLIC_URL || '') + '/share/' + token : null }); return;
+      sendJSON(res, 200, { url: token ? (process.env.ATLAS_PUBLIC_URL || '') + '/s/' + token : null }); return;
     }
     if (p === '/api/doc' && (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
       const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;
@@ -437,11 +483,11 @@ const server = http.createServer(async (req, res) => {
       sendFile(req, res, path.join(PUBLIC_DIR, 'index.html'));
       return;
     }
-    if (p === '/api/tree') { sendJSON(res, 200, buildTree()); return; }
+    if (p === '/api/tree') { responses.json(res, 200, buildTree(), { validate: true }); return; }
     if (p === '/api/cards') {
       const dir = u.searchParams.get('dir') || '';
       const sharedPaths = shares.paths();
-      sendJSON(res, 200, { cards: buildCards(dir).map(card => ({ ...card, isShared: card.isMarkdown && sharedPaths.has(card.relPath) })) });
+      responses.json(res, 200, { cards: buildCards(dir).map(card => ({ ...card, isShared: card.isMarkdown && sharedPaths.has(card.relPath) })) }, { validate: true });
       return;
     }
     if (p === '/api/doc') {
@@ -451,9 +497,11 @@ const server = http.createServer(async (req, res) => {
       const st = fs.statSync(abs);
       if (!st.isFile()) { sendJSON(res, 404, { error: 'not found' }); return; }
       if (path.extname(abs).toLowerCase() === '.md') {
-        sendJSON(res, 200, documents.read(rel)); return;
+        const doc = documents.read(rel);
+        if (!doc) { sendJSON(res, 404, { error: 'not found' }); return; }
+        sendDocument(req, res, doc); return;
       } else {
-        sendJSON(res, 200, { relPath: rel, isMarkdown: false, mtime: st.mtimeMs, size: st.size });
+        sendDocument(req, res, { relPath: rel, isMarkdown: false, mtime: st.mtimeMs, size: st.size });
       }
       return;
     }
