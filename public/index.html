@@ -952,10 +952,13 @@ function boundedViewCache(limit, maxEntries = 20) {
 const documentViews = boundedViewCache(16 * 1024 * 1024);
 const articleViews = boundedViewCache(8 * 1024 * 1024);
 const pendingDocuments = new Map();
+const pendingCatalog = new Map();
+const catalogTags = new Map();
 let cacheGeneration = 0;
 let listMounts = new WeakMap();
 function clearViewCaches() {
   cacheGeneration++; documentViews.clear(); articleViews.clear(); pendingDocuments.clear(); listMounts = new WeakMap();
+  pendingCatalog.clear(); catalogTags.clear();
 }
 async function fetchDocument(rel) {
   if (pendingDocuments.has(rel)) return pendingDocuments.get(rel);
@@ -976,7 +979,7 @@ async function fetchDocument(rel) {
   finally { if (pendingDocuments.get(rel) === task) pendingDocuments.delete(rel); }
 }
 function articleHTML(doc) {
-  const key = JSON.stringify([AtlasReader.body(doc.content), doc.assets, doc.links, doc.links ? null : nameIndex]);
+  const key = JSON.stringify([doc.relPath, doc.version || AtlasReader.body(doc.content), doc.assets, doc.links, doc.links ? null : nameIndex]);
   const hit = articleViews.get(key);
   if (hit !== undefined) return hit;
   const html = AtlasReader.render(doc, { names: nameIndex, assetUrl: fileUrl });
@@ -987,12 +990,31 @@ function listKey(list, emptyText) {
   return JSON.stringify([viewTitle, viewSub, filters, route.view === 'shared', ymdOf(Date.now()), emptyText, list]);
 }
 function restoreList(target, key) {
-  const hit = listMounts.get(target);
-  if (!hit || hit.key !== key) return false;
+  const cache = listMounts.get(target), hit = cache?.entries.get(key);
+  if (!hit) return false;
+  captureListPosition(target);
+  cache.entries.delete(key); cache.entries.set(key, hit); cache.active = hit;
   if (target.firstChild !== hit.nodes[0]) target.replaceChildren(...hit.nodes);
+  if (target === main) document.documentElement.scrollTop = hit.scroll;
+  else target.scrollTop = hit.scroll;
   return true;
 }
-function retainList(target, key) { listMounts.set(target, { key, nodes: [...target.childNodes] }); }
+function captureListPosition(target) {
+  const hit = listMounts.get(target)?.active;
+  if (hit && target.firstChild === hit.nodes[0]) hit.scroll = target === main ? document.documentElement.scrollTop : target.scrollTop;
+}
+function retainList(target, key) {
+  let cache = listMounts.get(target);
+  if (!cache) { cache = { entries: new Map(), active: null }; listMounts.set(target, cache); }
+  const hit = { nodes: [...target.childNodes], scroll: 0, cards: target.querySelectorAll('.card').length };
+  cache.entries.delete(key); cache.entries.set(key, hit); cache.active = hit;
+  // Bound both retained views and card nodes; always retain the current list.
+  let cards = [...cache.entries.values()].reduce((sum, entry) => sum + entry.cards, 0);
+  while (cache.entries.size > 1 && (cache.entries.size > 8 || cards > 4000)) {
+    const oldest = cache.entries.keys().next().value;
+    cards -= cache.entries.get(oldest).cards; cache.entries.delete(oldest);
+  }
+}
 
 const $ = (s) => document.querySelector(s);
 const main = $('#main');
@@ -1197,9 +1219,25 @@ $('#btn-nav').onclick = () => toggleSidebar(!$('#sidebar').classList.contains('i
 $('#btn-nav-close').onclick = () => toggleSidebar(false);
 
 /* ============ 数据加载 ============ */
-async function loadCards() {
-  const r = await fetch('/api/cards');
-  const j = await r.json();
+async function loadCatalog(url, apply) {
+  if (pendingCatalog.has(url)) return pendingCatalog.get(url);
+  const generation = cacheGeneration, tag = catalogTags.get(url);
+  const task = (async () => {
+    const r = await fetch(url, tag ? { headers: { 'If-None-Match': tag } } : undefined);
+    if (generation !== cacheGeneration) return loadCatalog(url, apply);
+    if (r.status === 304 && tag) return;
+    if (r.ok === false) throw Error('列表加载失败，请重试');
+    const j = await r.json();
+    if (generation !== cacheGeneration) return loadCatalog(url, apply);
+    apply(j);
+    const nextTag = r.headers?.get('etag');
+    if (nextTag) catalogTags.set(url, nextTag); else catalogTags.delete(url);
+  })();
+  pendingCatalog.set(url, task);
+  try { return await task; }
+  finally { if (pendingCatalog.get(url) === task) pendingCatalog.delete(url); }
+}
+function loadCards() { return loadCatalog('/api/cards', j => {
   allCards = j.cards;
   nameIndex = {};
   dirCounts = new Map();
@@ -1215,11 +1253,8 @@ async function loadCards() {
     if (c.isMarkdown) nameIndex[c.relPath.split('/').pop().replace(/\.md$/,'').toLowerCase()] = c.relPath;
   }
   $('#stat').innerHTML = `共 <b>${allCards.length}</b> 篇 · <b>${new Set(allCards.map(c=>topCat(c.dir)).filter(Boolean)).size}</b> 个分类`;
-}
-async function loadTree() {
-  const r = await fetch('/api/tree');
-  treeData = await r.json();
-}
+}); }
+function loadTree() { return loadCatalog('/api/tree', j => { treeData = j; }); }
 
 /* ============ 侧栏 ============ */
 function renderSidebar() {
@@ -1344,6 +1379,7 @@ function filterBarHTML(count) {
 }
 
 function refreshList() {
+  captureListPosition(renderTarget());
   const list = applyFilters(baseList);
   const emptyText = viewTitle === '分享笔记' && !baseList.length ? '暂无已分享的笔记' : '该筛选条件下没有笔记';
 
@@ -1388,7 +1424,8 @@ function renderMobileList(list, emptyText) {
   const showChips = route.view !== 'shared';
   const chips = $('#m-chips');
   chips.style.display = showChips ? 'flex' : 'none';
-  if (showChips) {
+  const chipsKey = JSON.stringify(filters);
+  if (showChips && chips.atlasKey !== chipsKey) {
     const periods = [['all','全部'],['today','今天'],['week','近 7 天'],['month','近 30 天'],['quarter','近 90 天']];
     const sorts = [['new','最新优先'],['old','最早优先'],['title','标题 A-Z']];
     chips.innerHTML =
@@ -1399,10 +1436,12 @@ function renderMobileList(list, emptyText) {
       btn.onclick = () => { filters[btn.dataset.f] = btn.dataset.v; refreshList(); };
     });
   }
+  if (showChips) chips.atlasKey = chipsKey;
 
   const target = $('#m-scroll');
   const key = listKey(list, emptyText);
-  if (!restoreList(target, key)) {
+  const restored = restoreList(target, key);
+  if (!restored) {
     target.innerHTML = list.length
       ? '<div class="grid m-masonry"><div class="m-col"></div><div class="m-col"></div></div>'
       : emptyState(emptyText);
@@ -1418,7 +1457,8 @@ function renderMobileList(list, emptyText) {
   }
   const mountedGrid = target.querySelector('.m-masonry');
   if (mountedGrid && needsMasonryLayout(mountedGrid)) scheduleMasonry(mountedGrid);
-  target.scrollTop = restoreMobileFeed ? mobileFeedScroll : 0;
+  if (restoreMobileFeed) target.scrollTop = mobileFeedScroll;
+  else if (!restored) target.scrollTop = 0;
   syncToTop();
 }
 
@@ -1973,6 +2013,7 @@ function renderView() {
     history.replaceState(null, '', acceptedHash || '#all');
     return;
   }
+  captureListPosition(renderTarget());
   clearEditor();
   const nextRoute = parseHash();
   const changed = acceptedHash !== location.hash;

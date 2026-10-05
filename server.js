@@ -159,10 +159,15 @@ function cardDetails(entry, rel, resolveImage) {
   }
   // Resolve against live files, so deletion/addition cannot leave a cached fallback in charge.
   const cover = coverFrom(entry.content, rel, resolveImage, entry);
+  let dimensions = {};
+  if (cover?.startsWith('data:')) {
+    if (entry.coverDimensions?.source !== cover) entry.coverDimensions = { source: cover, value: imageSize(Buffer.from(cover.split(',')[1], 'base64')) };
+    dimensions = entry.coverDimensions.value;
+  } else delete entry.coverDimensions;
   return {
     ...entry.card,
     cover: cover?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : cover,
-    ...(cover?.startsWith('data:') ? imageSize(Buffer.from(cover.split(',')[1], 'base64')) : {}),
+    ...dimensions,
   };
 }
 

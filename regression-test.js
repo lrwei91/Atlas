@@ -372,6 +372,14 @@ async function mobileFrontendTests() {
     for (const file of ['vendor/marked.min.js', 'reader.js']) w.eval(fs.readFileSync(path.join(__dirname, 'public', file), 'utf8'));
     w.eval(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
     await waitFor(() => $('#m-scroll .card'));
+    const allTabCard = $('#m-scroll .card');
+    const originalChips = $('#m-chips').firstChild;
+    $('#m-scroll').scrollTop = 180;
+    w.setRoute('shared'); await pause(20);
+    w.setRoute('all'); await pause(20);
+    assert.equal($('#m-scroll .card'), allTabCard, 'mobile tab return retains cards and images');
+    assert.equal($('#m-scroll').scrollTop, 180, 'mobile tabs retain their scroll position');
+    assert.equal($('#m-chips').firstChild, originalChips, 'unchanged filter chips are reused');
     $('#btn-nav').click(); assert.equal($('#m-mask').classList.contains('on'), true);
     // 侧栏支持明确关闭按钮、遮罩及向左滑动，关闭按钮恢复触发器焦点。
     assert.equal(w.document.activeElement, $('#btn-nav-close'));

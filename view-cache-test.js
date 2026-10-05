@@ -8,15 +8,18 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const html = fs.readFileSync('public/index.html', 'utf8');
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window, calls = [];
-  const cards = Array.from({ length: 500 }, (_, i) => ({ relPath: `note-${i}.md`, title: `Note ${i}`, dir: '', isMarkdown: true, isShared: false, chars: 20, excerpt: 'Body text', mtime: Date.now() }));
+  const cards = Array.from({ length: 500 }, (_, i) => ({ relPath: `note-${i}.md`, title: `Note ${i}`, dir: '', isMarkdown: true, isShared: i < 10, chars: 20, excerpt: 'Body text', mtime: Date.now() }));
   let revision = 1, exists = true, delayed = false, renders = 0;
   const doc = () => ({ relPath: 'note-0.md', title: 'Note 0', isMarkdown: true, content: '# Note 0\nBody ' + revision, assets: {}, links: {}, version: String(revision), mtime: revision });
   const reply = (value, status = 200, tag = null) => ({ status, ok: status === 200, headers: { get: name => name === 'etag' ? tag : null }, json: async () => { assert.notEqual(status, 304, '304 has no JSON body'); return value; } });
   w.fetch = async (url, options = {}) => {
     calls.push({ url, options });
-    if (url === '/api/cards') return reply({ cards });
-    if (url === '/api/tree') return reply({ children: [] });
-    if (url.startsWith('/api/share')) return reply({ url: null });
+    if (url === '/api/cards' || url === '/api/tree') {
+      if (delayed) await pause(25);
+      const tag = '"catalog-' + revision + '"';
+      return options.headers?.['If-None-Match'] === tag ? reply(null, 304, tag) : reply(url === '/api/cards' ? { cards } : { children: [] }, 200, tag);
+    }
+    if (url.startsWith('/api/share')) return reply({ url: 'https://example.com/shared' });
     if (options.method === 'PUT') { revision++; return reply({ ok: true }); }
     if (!exists) return reply(null, 404);
     const current = doc(), tag = '"' + revision + '"';
@@ -40,6 +43,26 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       for (let i = 0; i < 100 && (w.parseHash().view !== view || /正在加载/.test(w.document.querySelector('#main').textContent)); i++) await pause(10);
       assert.equal(w.parseHash().view, view); assert.doesNotMatch(w.document.querySelector('#main').textContent, /正在加载/);
     };
+    const catalogs = () => calls.filter(c => c.url === '/api/cards' || c.url === '/api/tree');
+    const originalCatalogCalls = catalogs().length;
+    w.document.documentElement.scrollTop = 321;
+    await navigate('shared');
+    const sharedCard = w.document.querySelector('.card');
+    assert.equal(w.document.querySelectorAll('.card').length, 10);
+    await navigate('all');
+    assert.equal(w.document.querySelector('.card'), first, 'tab return retains original DOM');
+    assert.equal(w.document.documentElement.scrollTop, 321, 'each tab retains scroll');
+    await navigate('shared');
+    assert.equal(w.document.querySelector('.card'), sharedCard);
+    await navigate('all');
+    assert.equal(catalogs().length, originalCatalogCalls, 'tab switches issue no catalog requests');
+    await Promise.all([w.loadCards(), w.loadTree()]);
+    assert.ok(catalogs().slice(-2).every(c => c.options.headers['If-None-Match'] === '"catalog-1"'));
+    delayed = true;
+    const catalogCount = catalogs().length;
+    await Promise.all([w.loadCards(), w.loadCards()]);
+    assert.equal(catalogs().length, catalogCount + 1, 'concurrent catalog validation coalesces');
+    delayed = false;
     await navigate('doc', 'note-0.md'); assert.equal(renders, 1);
     await navigate('all'); assert.equal(w.document.querySelector('.card'), first);
     await navigate('doc', 'note-0.md'); assert.equal(renders, 1, 'unchanged Markdown must not be reparsed');
@@ -54,8 +77,14 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(a.doc, b.doc); assert.equal(docs().length, count + 1, 'concurrent document requests must coalesce');
     // A mutation during an in-flight read cannot repopulate stale cache or deadlock.
     const oldRead = w.fetchDocument('note-2.md');
+    const oldCatalogRead = w.loadCards();
     await w.fetch('/api/doc?path=note-0.md', { method: 'PUT' });
     assert.match((await oldRead).doc.content, /Body 3/);
+    await oldCatalogRead;
+    assert.equal(catalogs().at(-1).options.headers, undefined, 'in-flight catalog retries after mutation');
+    w.clearViewCaches();
+    await w.loadCards();
+    assert.equal(catalogs().at(-1).options.headers, undefined, 'mutation clears catalog validator');
     await navigate('all'); await navigate('doc', 'note-0.md');
     assert.equal(docs().at(-1).options.headers, undefined);
     assert.match(w.document.querySelector('.article').textContent, /Body 3/);
@@ -67,6 +96,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(small.get('b'), undefined); assert.equal(small.get('a'), 1);
     small.set('huge', 4, 20); assert.equal(small.get('huge'), undefined);
     small.clear(); assert.equal(small.get('a'), undefined);
+    const probe = w.document.createElement('section');
+    for (let i = 0; i < 9; i++) { probe.innerHTML = '<div class="card"></div>'; w.retainList(probe, String(i)); }
+    assert.equal(w.restoreList(probe, '0'), false, 'oldest tab DOM is evicted at view limit');
+    assert.equal(w.restoreList(probe, '1'), true);
     console.log('PASS: list DOM reuse, validated document cache/304, render reuse, external changes/deletion, request coalescing, mutation race, bounded LRU');
   } finally { dom.window.close(); }
   const direct = new JSDOM(html, { url: 'http://localhost/#doc=deep.md', runScripts: 'outside-only' });
