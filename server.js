@@ -18,6 +18,12 @@ const fs = require('fs');
 const path = require('path');
 const auth = require('./auth');
 const shares = require('./shares');
+const sharePublisher = require('./github-share');
+const exportShare = require('./static-share');
+const crypto = require('node:crypto');
+let shareQueue = Promise.resolve();
+function shareMutation(work) { const result = shareQueue.then(work); shareQueue = result.catch(() => {}); return result; }
+async function revokeShare(rel) { const token = shares.find(rel); const share = token && shares.get(token); if (share?.url) await sharePublisher.revoke(token); shares.revoke(rel); }
 const demo = require('./demo-vault');
 const readBody = require('./request-body');
 const versionOf = require('./document-version');
@@ -342,6 +348,10 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
       const match = /^\/(?:share|s)\/([A-Za-z0-9_-]{22}|[a-f0-9]{64})(?:\/(doc|file))?\/?$/.exec(p);
       const share = match && shares.get(match[1]);
+      if (share?.url) {
+        if (match[2] || !['GET', 'HEAD'].includes(req.method)) { sendJSON(res, 404, { error: '此分享已导出为静态页面' }); return; }
+        res.writeHead(302, { Location: share.url, 'Cache-Control': 'no-store' }); res.end(); return;
+      }
       const doc = share && documents.read(share.relPath);
       if (!doc || !['GET', 'HEAD'].includes(req.method)) { sendJSON(res, 404, { error: '分享不存在或已取消' }); return; }
       if (!match[2]) { sendFile(req, res, path.join(PUBLIC_DIR, 'share.html')); return; }
@@ -408,10 +418,22 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' || req.method === 'DELETE') {
         const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;
         if (req.headers.origin !== expected) { sendJSON(res, 403, { error: '请求来源无效' }); return; }
-        if (req.method === 'DELETE') shares.revoke(rel); else shares.create(rel);
+        try {
+          await shareMutation(async () => {
+            if (req.method === 'DELETE') await revokeShare(rel);
+            else {
+              const doc = documents.read(rel);
+              if (!doc) throw Error('文档已不存在');
+              const token = shares.find(rel) || crypto.randomBytes(16).toString('base64url');
+              const publication = await sharePublisher.publish(token, exportShare(doc, VAULT, safeResolve));
+              shares.published(rel, token, publication);
+            }
+          });
+        } catch { sendJSON(res, 502, { error: 'GitHub 分享失败，请检查 GitHub 登录、网络和分享仓库状态后重试' }); return; }
       } else if (req.method !== 'GET') { sendJSON(res, 405, { error: 'method not allowed' }); return; }
       const token = shares.find(rel);
-      sendJSON(res, 200, { url: token ? (process.env.ATLAS_PUBLIC_URL || '') + '/s/' + token : null }); return;
+      const publication = token && shares.get(token);
+      sendJSON(res, 200, { url: publication?.url || (token ? (process.env.ATLAS_PUBLIC_URL || '') + '/s/' + token : null), provider: publication?.url ? 'github' : null, commitSha: publication?.commitSha || null }); return;
     }
     if (p === '/api/doc' && (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
       const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;
@@ -501,9 +523,9 @@ const server = http.createServer(async (req, res) => {
       }
       try {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
+        await shareMutation(() => revokeShare(relPosix));
         fs.renameSync(abs, dest);
       } catch { sendJSON(res, 500, { error: '删除失败，文档未改动' }); return; }
-      shares.revoke(relPosix);
       sendJSON(res, 200, { ok: true, trash: path.relative(VAULT, dest).split(path.sep).join('/') });
       return;
     }

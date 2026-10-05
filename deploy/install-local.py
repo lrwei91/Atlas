@@ -21,7 +21,7 @@ if not node:
 label = 'com.lrwei91.atlas'
 agent = pathlib.Path.home() / 'Library/LaunchAgents' / (label + '.plist')
 agent.parent.mkdir(parents=True, exist_ok=True)
-env = {'PORT': '4317', 'ATLAS_STATE_DIR': str(state)}
+env = {'PORT': '4317', 'ATLAS_STATE_DIR': str(state), 'PATH': os.environ.get('PATH', os.defpath)}
 if args.public_url:
     env['ATLAS_PUBLIC_URL'] = args.public_url
 config = {

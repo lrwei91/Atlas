@@ -8,12 +8,19 @@ const assert = require('node:assert/strict');
   const base = process.env.ATLAS_TEST_URL || 'http://localhost:4317';
   const html = fs.readFileSync(__dirname + '/public/index.html', 'utf8');
   const errors = [];
+  let simulatedShare = null;
   const dom = new JSDOM(html, {
     url: base + '/',
     runScripts: 'outside-only',
     beforeParse(window) {
       window.fetch = (input, options = {}) => {
         const url = typeof input === 'string' ? input : input.url;
+        // Browser smoke uses a stub; real publish/revoke is tested against a bare repo in share-test.js.
+        if (url.startsWith('/api/share')) {
+          if (options.method === 'POST') simulatedShare = 'https://example.test/Share/documents/' + 'A'.repeat(22) + '/';
+          if (options.method === 'DELETE') simulatedShare = null;
+          return Promise.resolve({ ok: true, json: async () => ({ url: simulatedShare }) });
+        }
         const abs = url.startsWith('http') ? url : base + url;
         return global.fetch(abs, { ...options, headers: { Cookie: process.env.ATLAS_TEST_COOKIE || '', Origin: 'https://note.lrwei91.online', ...options.headers } });
       };
@@ -50,12 +57,11 @@ const assert = require('node:assert/strict');
     doc.querySelector('#btn-share').click();
     await new Promise(r => setTimeout(r, 500));
     const shareURL = doc.querySelector('#share-link').value;
-    if (!/\/s\/[A-Za-z0-9_-]{22}$/.test(shareURL) || doc.querySelector('#share-result').hidden) errors.push('分享链接未显示');
+    if (!/\/documents\/[A-Za-z0-9_-]{22}\/$/.test(shareURL) || doc.querySelector('#share-result').hidden) errors.push('分享链接未显示');
     doc.querySelector('#btn-revoke').click();
     await new Promise(r => setTimeout(r, 500));
     if (!doc.querySelector('#share-result').hidden || !doc.querySelector('#btn-revoke').hidden) errors.push('取消分享状态错误');
-    const publicPath = new URL(shareURL).pathname;
-    if ((await global.fetch(base + publicPath)).status !== 404) errors.push('取消后分享链接仍可用');
+    if (simulatedShare !== null) errors.push('取消后分享状态仍存在');
     console.log('分享与取消分享按钮:', errors.length ? '失败' : '正常');
     // 搜索
     w.location.hash = 'q=' + encodeURIComponent('自动化');

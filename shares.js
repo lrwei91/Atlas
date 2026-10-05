@@ -38,4 +38,5 @@ function create(rel) { const existing = find(rel); if (existing) return existing
 function revoke(rel) { const all = load(); for (const [token,value] of Object.entries(all)) if (value.relPath === rel) delete all[token]; save(all); }
 function get(token) { if (!validToken(token)) return null; const all = load(); return all[token] || all[aliases.get(token)] || null; }
 function paths() { return new Set(Object.values(load()).map(value => value.relPath)); }
-module.exports = { find, create, revoke, get, paths };
+function published(rel, token, publication) { const all = load(); all[token] = { ...(all[token] || {}), relPath: rel, ...publication }; save(all); }
+module.exports = { find, create, revoke, get, paths, published };
