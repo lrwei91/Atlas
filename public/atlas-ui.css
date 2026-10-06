@@ -150,6 +150,14 @@ button:active:not(:disabled) { background-color: var(--accent-tint); color: var(
 /* Loading: a small stack of paper with an indeterminate yellow scan. */
 .atlas-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; min-height: 240px; padding: 48px 20px; box-sizing: border-box; color: var(--text-secondary); }
 .atlas-loading p { margin: 0; font: 13px/1.6 var(--font); letter-spacing: .04em; }
+/* Center the complete loading group in the available pane, not a short placeholder. */
+@media (min-width: 768px) {
+  .atlas-workbench #main:has(> .atlas-loading) { display: flex; align-items: center; justify-content: center; min-height: calc(100dvh - var(--header-height) - var(--guest-bar-h, 0px)); padding: 20px; }
+}
+@media (max-width: 767px) {
+  .atlas-workbench #m-scroll:has(> .atlas-loading), .atlas-workbench #m-reader-body:has(> .atlas-loading) { display: flex; align-items: center; justify-content: center; padding: 20px; }
+}
+.atlas-workbench :is(#main, #m-scroll, #m-reader-body) > .atlas-loading { min-height: 0; padding: 0; width: 100%; }
 .atlas-loading-art { position: relative; width: 72px; height: 76px; }
 .atlas-loading-sheet { position: absolute; left: 12px; top: 6px; width: 48px; height: 60px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); }
 .atlas-loading-sheet:nth-child(1) { transform: translate(-7px, 5px) rotate(-10deg); background: var(--surface-subtle); }
