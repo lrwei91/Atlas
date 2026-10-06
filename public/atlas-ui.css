@@ -1,5 +1,5 @@
 /* Atlas: a knowledge workbench, with paper, ink and yellow editorial accents.
-   Keep compact browsing and quiet reading; no promotional hero or continuous motion. */
+   Keep compact browsing and quiet reading; motion is limited to active loading and feedback. */
 :root {
   color-scheme: light;
   --canvas: #f7f7f2;
@@ -147,6 +147,21 @@ button:active:not(:disabled) { background-color: var(--accent-tint); color: var(
 @media (hover: none) {
   .atlas-workbench .card:hover, .atlas-workbench .result:hover { transform: none; box-shadow: none; }
 }
+/* Loading: a small stack of paper with an indeterminate yellow scan. */
+.atlas-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; min-height: 240px; padding: 48px 20px; box-sizing: border-box; color: var(--text-secondary); }
+.atlas-loading p { margin: 0; font: 13px/1.6 var(--font); letter-spacing: .04em; }
+.atlas-loading-art { position: relative; width: 72px; height: 76px; }
+.atlas-loading-sheet { position: absolute; left: 12px; top: 6px; width: 48px; height: 60px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); }
+.atlas-loading-sheet:nth-child(1) { transform: translate(-7px, 5px) rotate(-10deg); background: var(--surface-subtle); }
+.atlas-loading-sheet:nth-child(2) { transform: translate(7px, 3px) rotate(9deg); background: var(--accent-tint); }
+.atlas-loading-sheet:nth-child(3) { display: flex; flex-direction: column; gap: 7px; padding: 15px 9px; overflow: hidden; animation: atlas-paper-breathe 2.4s ease-in-out infinite; }
+.atlas-loading-sheet i { height: 2px; flex-shrink: 0; width: 100%; background: var(--border); border-radius: 1px; }
+.atlas-loading-sheet i:first-child { width: 60%; background: var(--text-primary); }
+.atlas-loading-sheet i:nth-child(3) { width: 78%; }
+.atlas-loading-sheet b { position: absolute; left: 5px; right: 5px; top: 0; height: 8px; background: var(--accent); opacity: .8; transform: translateY(12px); animation: atlas-paper-scan 2.4s ease-in-out infinite; }
+@keyframes atlas-paper-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes atlas-paper-scan { 0%, 100% { transform: translateY(12px); opacity: 0; } 20% { opacity: .8; } 75% { opacity: .8; } 90% { transform: translateY(44px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
+  .atlas-loading-sheet:nth-child(3), .atlas-loading-sheet b { animation: none !important; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

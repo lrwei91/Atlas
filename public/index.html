@@ -786,7 +786,7 @@ main { flex: 1; margin-left: var(--sidebar-w); padding: 28px 32px 90px; max-widt
   aside #nav-tree { flex: none; overflow: visible; }
 }
 </style>
-<link rel="stylesheet" href="/atlas-ui.css?v=20261003-editorial1">
+<link rel="stylesheet" href="/atlas-ui.css?v=20261006-loading1">
 </head>
 <body class="atlas-workbench">
 
@@ -1473,7 +1473,7 @@ function renderCards(cards, title, sub) {
 /* ============ 阅读视图 ============ */
 async function renderDoc(relPath, epoch = ++viewEpoch) {
   if (isMobile()) return renderMobileDoc(relPath, epoch);
-  main.innerHTML = emptyState('正在加载…');
+  main.innerHTML = loadingState('正在加载…');
   const result = await fetchDocument(relPath);
   if (!isCurrentView(epoch)) return;
   if (!result.ok) { main.innerHTML = emptyState('文档不存在或无法读取'); return; }
@@ -1633,7 +1633,7 @@ async function renderMobileDoc(relPath, epoch) {
   $('#btn-m-share').disabled = $('#btn-m-more').disabled = true;
   shell.classList.add('on');
   body.scrollTop = 0;
-  body.innerHTML = emptyState('正在加载…');
+  body.innerHTML = loadingState('正在加载…');
   const result = await fetchDocument(relPath);
   if (!isCurrentView(epoch) || !isMobile()) return;
   if (!result.ok) { body.innerHTML = emptyState('文档不存在或无法读取'); return; }
@@ -1958,7 +1958,7 @@ async function renderSearch(q, epoch = ++viewEpoch) {
     $('#m-title').textContent = '搜索';
     $('#m-sub').textContent = `「${q}」`;
   }
-  target.innerHTML = emptyState('正在搜索…');
+  target.innerHTML = loadingState('正在搜索…');
   const r = await fetch('/api/search?q=' + encodeURIComponent(q));
   const j = await r.json();
   if (!isCurrentView(epoch)) return;
@@ -1998,6 +1998,9 @@ async function renderSearch(q, epoch = ++viewEpoch) {
 /* ============ 空态 ============ */
 function emptyState(text) {
   return `<div class="empty"><div class="e-icon">◌</div><p>${text}</p></div>`;
+}
+function loadingState(text) {
+  return `<div class="atlas-loading" role="status" aria-live="polite"><div class="atlas-loading-art" aria-hidden="true"><span class="atlas-loading-sheet"></span><span class="atlas-loading-sheet"></span><span class="atlas-loading-sheet"><i></i><i></i><i></i><b></b></span></div><p>${esc(text)}</p></div>`;
 }
 
 /* ============ 阅读进度（被动 scroll + rAF 合帧，CSS 变量驱动） ============ */
@@ -2433,7 +2436,7 @@ function applyGuestUI() {
 
 /* ============ 启动 ============ */
 (async function init() {
-  renderTarget().innerHTML = emptyState('正在加载笔记…');
+  renderTarget().innerHTML = loadingState('正在加载笔记…');
   const directDoc = parseHash().view === 'doc';
   try {
     const data = Promise.all([loadCards(), loadTree()]);
