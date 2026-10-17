@@ -142,19 +142,18 @@ const { spawn } = require('node:child_process');
     seedLegacyShare();
     const replacement = await (await get(shareEndpoint)).json();
     assert.notEqual(replacement.url, shared.url);
-    // External changes and legacy migrations remain visible through the in-memory index.
+    // External changes remain visible; retired routes must not gain access.
     const recordsFile = path.join(state, 'shares.json');
     const records = JSON.parse(fs.readFileSync(recordsFile, 'utf8'));
-    const legacy = 'a'.repeat(64);
-    records[legacy] = { relPath: 'recent.md', createdAt: new Date().toISOString() };
+    const externalToken = 'a'.repeat(22);
+    records[externalToken] = { relPath: 'recent.md', createdAt: new Date().toISOString() };
     fs.writeFileSync(recordsFile, JSON.stringify(records));
-    assert.equal((await fetch(base + '/share/' + legacy + '/doc')).status, 200);
-    const migrated = await (await get('/api/share?path=recent.md')).json();
-    assert.match(new URL(migrated.url).pathname, /^\/s\/[A-Za-z0-9_-]{22}$/);
-    assert.equal((await fetch(base + new URL(migrated.url).pathname + '/doc')).status, 200);
+    assert.equal((await fetch(base + '/share/' + externalToken + '/doc')).status, 404);
+    const external = await (await get('/api/share?path=recent.md')).json();
+    assert.equal(new URL(external.url).pathname, '/s/' + externalToken);
+    assert.equal((await fetch(base + new URL(external.url).pathname + '/doc')).status, 200);
     await fetch(base + '/api/share?path=recent.md', { method: 'DELETE', headers: { Cookie: cookie, Origin: 'https://note.lrwei91.online' } });
-    assert.equal((await fetch(base + '/share/' + legacy + '/doc')).status, 404);
-    assert.equal((await fetch(base + new URL(migrated.url).pathname + '/doc')).status, 404);
+    assert.equal((await fetch(base + new URL(external.url).pathname + '/doc')).status, 404);
     const page = await get('/');
     assert.equal(page.headers.get('content-encoding'), 'gzip');
     const pageTag = page.headers.get('etag'); await page.text();

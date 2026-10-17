@@ -1,0 +1,22 @@
+[Unit]
+Description=Atlas knowledge MCP HTTPS tunnel
+After=network-online.target atlas-mcp.service
+Wants=network-online.target
+Requires=atlas-mcp.service
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+EnvironmentFile=/etc/atlas-mcp/atlas-mcp.env
+ExecStart=/usr/local/bin/cloudflared tunnel --config /etc/atlas-mcp/cloudflared.yml --no-autoupdate --no-prechecks --edge ${ATLAS_MCP_EDGE_PRIMARY} --edge ${ATLAS_MCP_EDGE_SECONDARY} run
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

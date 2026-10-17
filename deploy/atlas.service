@@ -1,0 +1,25 @@
+[Unit]
+Description=Atlas knowledge workbench
+After=network.target
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas
+EnvironmentFile=/etc/atlas/atlas.env
+ExecStartPre=/usr/bin/test -d /srv/atlas/vault/notes
+ExecStartPre=/usr/bin/test -d /srv/atlas/vault/resources
+ExecStartPre=/usr/bin/test -s /var/lib/atlas/state/admin.json
+ExecStart=/usr/local/bin/node /opt/atlas/server.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/atlas/vault /var/lib/atlas
+
+[Install]
+WantedBy=multi-user.target

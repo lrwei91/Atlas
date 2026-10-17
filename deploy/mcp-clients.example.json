@@ -1,0 +1,12 @@
+[
+  {
+    "id": "muse",
+    "tokenSha256": "REPLACE_WITH_SHA256_OF_A_DISTINCT_RANDOM_TOKEN",
+    "roots": ["example-directory"]
+  },
+  {
+    "id": "codex",
+    "tokenSha256": "REPLACE_WITH_SHA256_OF_ANOTHER_RANDOM_TOKEN",
+    "roots": ["example-directory"]
+  }
+]

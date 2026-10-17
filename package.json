@@ -4,14 +4,19 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "node share-test.js && node text-count-test.js && node link-test.js && node regression-test.js && node auth-test.js && node guest-test.js && node view-cache-test.js && node touch-layout-test.js",
+    "test": "node knowledge-test.js && node mcp-test.js && node local-share-test.js && node text-count-test.js && node link-test.js && node regression-test.js && node auth-test.js && node guest-test.js && node view-cache-test.js && node touch-layout-test.js",
+    "test:mcp": "node knowledge-test.js && node mcp-test.js",
+    "check:mcp": "node mcp-check.js",
     "test:performance": "node performance-test.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:mcp": "node mcp-server.js"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "jsdom": "^30.1.1"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "jsdom": "^30.1.1",
+    "zod": "^4.6.7"
   }
 }

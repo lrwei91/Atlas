@@ -1,9 +1,9 @@
 # Atlas 知识库工作台
 
-自托管的本机知识库工作台。服务实时读取你机器上的笔记目录，不上传任何文件到服务器；所有页面与接口都需要登录。
+自托管的知识库工作台。服务实时读取所在机器的笔记目录，支持本机运行，或在服务器运行并与本机双向同步；主库页面与接口需要登录，单篇分享可免登录访问。
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="Atlas 知识库工作台：浏览器访问本机 127.0.0.1:4317 上的 Atlas 服务，服务直接读取本机 notes/ 与 resources/ 目录，不上传、不落库">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Atlas 本机部署示意：浏览器访问 127.0.0.1:4317 上的服务，直接读取 notes/ 与 resources/ 目录">
 </p>
 
 ## 特性
@@ -16,16 +16,17 @@
 - **图片与视频**：支持 Markdown、HTML、`[[双链]]` 三种写法，含本地视频 Range 分段播放与封面
 - **移动端**：独立窄屏布局，含侧栏抽屉、日历、底部 tab 与边缘滑动返回
 - **PWA**：提供 `apple-touch-icon`，可添加到 iOS 主屏
+- **只读 MCP**：多个 AI Agent 共用知识库，支持目录授权、关键词检索、章节分页读取和引用附件访问
 
 ## 与其他方案的区别
 
 - **不建索引**：每次请求都从文件系统读取，进程内只按修改时间做缓存，没有需要同步的持久索引
-- **不搬数据**：笔记留在原目录，iCloud、Git 或任何同步工具都能继续管它
-- **不外联**：零运行时依赖，服务只监听 `127.0.0.1`，需要外部访问时自行接入隧道或反向代理
+- **文件式存储**：笔记保持 Markdown 与原始附件格式，本机可继续使用 iCloud、Obsidian 或 Git；服务器部署可另行配置双向同步
+- **回环监听**：服务只监听 `127.0.0.1`，需要外部访问时接入隧道或反向代理
 
 ## 快速开始
 
-需要 Node.js 18+（用到原生fetch）。运行时依赖只有 `jsdom`，且仅测试使用。
+推荐 Node.js 24。网页服务使用 `jsdom` 解析文档，独立 MCP 服务另使用官方 MCP SDK 和 `zod`；运行前需安装依赖。
 
 ```sh
 npm install
@@ -51,7 +52,7 @@ npm start
 
 ## 部署
 
-服务只监听回环地址，对外暴露需自行接入反向代理或隧道。仓库提供 `deploy/` 下三个脚本与一份代理示例：
+服务只监听回环地址，对外暴露需自行接入反向代理或隧道。仓库提供以下部署脚本与模板：
 
 | 文件 | 用途 |
 |---|---|
@@ -59,6 +60,11 @@ npm start
 | `install-cloudflare.py` | 将 Cloudflare Tunnel 注册为独立 LaunchAgent |
 | `install-tunnel.py` | SSH 反向隧道备用方案 |
 | `Caddyfile` | Caddy 反向代理示例（HTTPS + HSTS） |
+| `atlas.service`、`atlas.env.example` | Linux 服务与环境变量模板 |
+| `atlas-sync.service` | 独立双向同步服务模板 |
+| `Caddyfile.server` | 服务器本地 Atlas 的 HTTPS 代理模板 |
+
+服务器部署与双向同步见 [Linux 迁移说明](docs/linux-migration.md)。目标入口为 `https://note.lrwei91.cn`；中国大陆服务器的公网网站须先满足备案与接入条件。备案完成前可通过 SSH 转发私有访问，不切换原公网入口。
 
 以 Cloudflare Tunnel 为例，不需要云服务器或本机入站端口：
 
@@ -70,9 +76,17 @@ npm start
 
 参考：[Cloudflare Tunnel 本地管理隧道文档](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)。
 
+## 分享
+
+新分享统一由 Atlas 自身提供，链接为 `<ATLAS_PUBLIC_URL>/s/<随机标识>`，不再导出到 GitHub。分享内容随文档更新，只开放该文档引用的附件；取消分享或删除文档后链接立即失效。旧分享已撤销，不保留 GitHub 重定向、旧路径或旧标识兼容。详见 [服务器分享](docs/server-sharing.md)。
+
+## 知识库 MCP
+
+MCP 与网页服务独立运行，共用文档读取与搜索实现。各 Agent 使用独立 Bearer Token，可按目录限制只读权限；支持 `list_notes`、`search_notes`、`read_note`、`get_attachment`。服务端点为 `POST /note`，部署与客户端配置见 [MCP 接入说明](docs/knowledge-mcp.md)。正式凭据不进入仓库。
+
 ## API
 
-除登录与分享页外全部需要会话，且写操作校验请求来源。
+以下为网页服务 API：主库接口需要会话，且写操作校验请求来源；独立 MCP 服务使用 Bearer 认证。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -105,7 +119,7 @@ npm run test:performance   # 性能与实时更新回归，输出预热后 9 次
 
 ## 数据与安全
 
-- 所有笔记、搜索、附件、页面均需登录，公开路径仅有图标等静态资源
+- 网页主库的笔记、搜索、附件和页面均需登录；单篇分享仅开放所选文档及其引用附件，MCP 使用独立只读凭据
 - 写入与删除接口要求已登录会话并校验 `Origin`
 - 游客会话是封闭沙箱：只读、只能访问内置示例，写操作与主库附件一律拒绝
 - 分享链接使用 128 位随机熵，仅暴露该文档内引用的媒体；已被访客保存的内容无法撤回

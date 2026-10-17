@@ -1,0 +1,32 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-knowledge-'));
+try {
+  for (const dir of ['notes/技术/子目录', 'notes/技术其他', 'notes/私人', 'resources']) fs.mkdirSync(path.join(tmp, dir), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'notes/技术/中文.md'), '# 中文\n开头\n## 同步\n服务器同步资料\n### 细节\n保留细节\n## 结束\n其他内容');
+  fs.writeFileSync(path.join(tmp, 'notes/技术/子目录/第二.md'), '# 第二\n服务器同步资料');
+  fs.writeFileSync(path.join(tmp, 'notes/私人/秘密.md'), '# 秘密\n服务器同步资料');
+  fs.writeFileSync(path.join(tmp, 'notes/技术其他/旁支.md'), '# 旁支\n服务器同步资料');
+  fs.writeFileSync(path.join(tmp, 'notes/技术/.hidden.md'), '# 隐藏\n服务器同步资料');
+  fs.symlinkSync(path.join(tmp, 'notes/私人/秘密.md'), path.join(tmp, 'notes/技术/捷径.md'));
+  const createKnowledge = require('./knowledge');
+  const kb = createKnowledge(tmp, { roots: ['技术'] });
+  const hits = kb.search('服务器 同步');
+  assert.equal(hits.length, 2, 'search must filter hidden files, symlinks and other scopes');
+  assert.ok(hits.every(hit => hit.relPath.startsWith('技术/')));
+  assert.equal(kb.read('私人/秘密.md'), null);
+  assert.equal(kb.read('技术/捷径.md'), null, 'an in-scope symlink must not expose an out-of-scope file');
+  assert.equal(kb.read('../resources/no.md'), null);
+  assert.equal(kb.read('技术/.hidden.md'), null);
+  const doc = kb.read('技术/中文.md');
+  assert.equal(doc.title, '中文');
+  assert.ok(doc.version);
+  fs.writeFileSync(path.join(tmp, 'notes/技术/中文.md'), '# 更新\n新关键词');
+  assert.equal(kb.search('新关键词').length, 1, 'external edits must be visible');
+  assert.notEqual(kb.read('技术/中文.md').version, doc.version);
+  assert.equal(createKnowledge(tmp, { roots: [] }).search('资料').length, 0, 'empty scope denies access');
+  console.log('PASS: scoped search/read, Chinese paths, traversal/symlink/hidden-file isolation and fresh external edits');
+} finally { fs.rmSync(tmp, { recursive: true, force: true }); }

@@ -1,0 +1,13 @@
+{$ATLAS_MCP_DOMAIN} {
+    request_body {
+        max_size 64KB
+    }
+    @mcp path /note /healthz
+    handle @mcp {
+        reverse_proxy 127.0.0.1:4320
+    }
+    handle {
+        respond 404
+    }
+    header Strict-Transport-Security "max-age=31536000"
+}

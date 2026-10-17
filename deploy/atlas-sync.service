@@ -1,0 +1,21 @@
+[Unit]
+Description=Atlas vault synchronization
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+ExecStart=/usr/local/bin/syncthing serve --no-browser --no-restart --no-upgrade --log-level=warn --home=/var/lib/atlas/syncthing
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/atlas/vault /var/lib/atlas
+
+[Install]
+WantedBy=multi-user.target

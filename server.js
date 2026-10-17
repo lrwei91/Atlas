@@ -18,12 +18,9 @@ const fs = require('fs');
 const path = require('path');
 const auth = require('./auth');
 const shares = require('./shares');
-const sharePublisher = require('./github-share');
-const exportShare = require('./static-share');
-const crypto = require('node:crypto');
 let shareQueue = Promise.resolve();
 function shareMutation(work) { const result = shareQueue.then(work); shareQueue = result.catch(() => {}); return result; }
-async function revokeShare(rel) { const token = shares.find(rel); const share = token && shares.get(token); if (share?.url) await sharePublisher.revoke(token); shares.revoke(rel); }
+async function revokeShare(rel) { shares.revoke(rel); }
 const demo = require('./demo-vault');
 const readBody = require('./request-body');
 const versionOf = require('./document-version');
@@ -31,6 +28,7 @@ const reader = require('./public/reader');
 const responses = require('./response-cache');
 const imageSize = require('./image-size');
 const textCount = require('./text-count');
+const safeResolve = require('./safe-path');
 
 const VAULT = path.resolve(process.env.ATLAS_VAULT || '/Users/lrwei91/Library/Mobile Documents/com~apple~CloudDocs/知识库');
 const NOTES = path.join(VAULT, 'notes');
@@ -38,6 +36,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 4317);
 const noteCache = require('./note-cache')();
 const documents = require('./documents')(VAULT, safeResolve, noteCache);
+const knowledge = require('./knowledge')(VAULT, { noteCache });
 
 const IGNORE_FILES = new Set(['.DS_Store', '.obsidian', '.trash']);
 const EXCLUDED_CARD_PATHS = new Set(['00-notes-index.md']);
@@ -55,18 +54,6 @@ const MIME = {
 };
 
 /* ---------- 工具 ---------- */
-
-function safeResolve(base, rel) {
-  const resolved = path.resolve(base, rel);
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
-  try {
-    const realBase = fs.realpathSync(base);
-    const real = fs.realpathSync(resolved);
-    if (real !== realBase && !real.startsWith(realBase + path.sep)) return null;
-    if (path.relative(realBase, real).split(path.sep).some(part => part.startsWith('.'))) return null;
-    return real;
-  } catch { return null; }
-}
 
 function statOrNull(p) {
   try { return fs.statSync(p); } catch { return null; }
@@ -232,39 +219,7 @@ function buildCards(dirFilter) {
 }
 
 function searchDocs(q) {
-  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return [];
-  const results = [];
-  walk(NOTES, (full) => {
-    if (path.extname(full).toLowerCase() !== '.md') return;
-    const st = statOrNull(full);
-    if (!st) return;
-    let content, lower;
-    try { const entry = noteCache.read(full, st); content = entry.searchContent; lower = entry.lower; } catch { return; }
-    if (!terms.every((t) => lower.includes(t))) return;
-    const titleLine = (content.match(/^#\s+(.+)$/m) || [])[1];
-    const snippets = [];
-    const lines = content.split('\n');
-    let inFence = false;
-    for (let i = 0; i < lines.length && snippets.length < 3; i++) {
-      const line = lines[i];
-      if (line.trim().startsWith('```')) inFence = !inFence;
-      const l = line.toLowerCase();
-      if (terms.some((t) => l.includes(t))) {
-        const s = line.trim();
-        if (s) snippets.push(s.length > 160 ? s.slice(0, 160) + '…' : s);
-      }
-    }
-    results.push({
-      relPath: relToNotes(full),
-      title: (titleLine || path.basename(full, '.md')).trim().slice(0, 80),
-      mtime: st.mtimeMs,
-      dir: path.dirname(relToNotes(full)) === '.' ? '' : path.dirname(relToNotes(full)),
-      snippets,
-    });
-  });
-  results.sort((a, b) => b.mtime - a.mtime);
-  return results;
+  return knowledge.search(q);
 }
 
 /* ---------- HTTP ---------- */
@@ -346,12 +301,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p.startsWith('/share/') || p.startsWith('/s/')) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-      const match = /^\/(?:share|s)\/([A-Za-z0-9_-]{22}|[a-f0-9]{64})(?:\/(doc|file))?\/?$/.exec(p);
+      const match = /^\/s\/([A-Za-z0-9_-]{22})(?:\/(doc|file))?\/?$/.exec(p);
       const share = match && shares.get(match[1]);
-      if (share?.url) {
-        if (match[2] || !['GET', 'HEAD'].includes(req.method)) { sendJSON(res, 404, { error: '此分享已导出为静态页面' }); return; }
-        res.writeHead(302, { Location: share.url, 'Cache-Control': 'no-store' }); res.end(); return;
-      }
       const doc = share && documents.read(share.relPath);
       if (!doc || !['GET', 'HEAD'].includes(req.method)) { sendJSON(res, 404, { error: '分享不存在或已取消' }); return; }
       if (!match[2]) { sendFile(req, res, path.join(PUBLIC_DIR, 'share.html')); return; }
@@ -424,16 +375,13 @@ const server = http.createServer(async (req, res) => {
             else {
               const doc = documents.read(rel);
               if (!doc) throw Error('文档已不存在');
-              const token = shares.find(rel) || crypto.randomBytes(16).toString('base64url');
-              const publication = await sharePublisher.publish(token, exportShare(doc, VAULT, safeResolve));
-              shares.published(rel, token, publication);
+              shares.create(rel);
             }
           });
-        } catch { sendJSON(res, 502, { error: 'GitHub 分享失败，请检查 GitHub 登录、网络和分享仓库状态后重试' }); return; }
+        } catch { sendJSON(res, 502, { error: '分享操作失败，请稍后重试' }); return; }
       } else if (req.method !== 'GET') { sendJSON(res, 405, { error: 'method not allowed' }); return; }
       const token = shares.find(rel);
-      const publication = token && shares.get(token);
-      sendJSON(res, 200, { url: publication?.url || (token ? (process.env.ATLAS_PUBLIC_URL || '') + '/s/' + token : null), provider: publication?.url ? 'github' : null, commitSha: publication?.commitSha || null }); return;
+      sendJSON(res, 200, { url: token ? (process.env.ATLAS_PUBLIC_URL || '') + '/s/' + token : null }); return;
     }
     if (p === '/api/doc' && (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
       const expected = process.env.ATLAS_PUBLIC_URL || `http://${req.headers.host}`;

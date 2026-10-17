@@ -1525,16 +1525,16 @@ async function renderDoc(relPath, epoch = ++viewEpoch) {
   let shareUrl = null;
   const shareButton = $('#btn-share');
   const mounted = () => isCurrentView(epoch) && shareButton.isConnected;
-  const showShare = url => { if (!mounted()) return; shareUrl = url; const current = allCards.find(card => card.relPath === relPath); if (current) current.isShared = !!url; renderSidebar(); $('#btn-revoke').hidden = !url; $('#btn-share').textContent = url ? '更新并复制分享链接' : '分享文档'; };
+  const showShare = url => { if (!mounted()) return; shareUrl = url; const current = allCards.find(card => card.relPath === relPath); if (current) current.isShared = !!url; renderSidebar(); $('#btn-revoke').hidden = !url; $('#btn-share').textContent = url ? '复制分享链接' : '分享文档'; };
   fetch(shareEndpoint).then(r => r.json()).then(result => { if (mounted()) showShare(result.url); }).catch(() => { if (mounted()) $('#share-status').textContent = '分享状态加载失败，请重试'; });
   $('#btn-share').onclick = async () => {
     const button = $('#btn-share'); button.disabled = true;
     try {
-      $('#share-status').textContent = '正在导出并提交 GitHub…';
+      $('#share-status').textContent = '正在生成分享链接…';
       { const r = await fetch(shareEndpoint, { method: 'POST' }); const result = await r.json(); if (!mounted()) return; if (!r.ok) throw Error(result.error); showShare(result.url); }
       if (!mounted()) return;
       $('#share-result').hidden = false; $('#share-link').value = new URL(shareUrl, location.origin).href;
-      try { await navigator.clipboard.writeText($('#share-link').value); if (!mounted()) return; $('#share-status').textContent = '链接已复制；GitHub Pages 更新可能需要几分钟'; }
+      try { await navigator.clipboard.writeText($('#share-link').value); if (!mounted()) return; $('#share-status').textContent = '链接已复制'; }
       catch { if (!mounted()) return; $('#share-link').select(); $('#share-status').textContent = '请复制下方链接'; }
     } catch(e) { if (mounted()) $('#share-status').textContent = e.message; } finally { button.disabled = false; }
   };
@@ -1722,7 +1722,7 @@ async function renderMobileDoc(relPath, epoch) {
       return;
     }
     shareBusy = true;
-    toast('正在导出并提交 GitHub…');
+    toast('正在生成分享链接…');
     try {
       const resp = await fetch(shareEndpoint, { method: 'POST' });
       const result = await resp.json();
@@ -1732,7 +1732,7 @@ async function renderMobileDoc(relPath, epoch) {
       const box = $('#m-share-result');
       box.hidden = false;
       $('#m-share-link').value = new URL(shareUrl, location.origin).href;
-      try { await navigator.clipboard.writeText($('#m-share-link').value); toast('链接已复制，静态页面稍后生效'); }
+      try { await navigator.clipboard.writeText($('#m-share-link').value); toast('链接已复制'); }
       catch { $('#m-share-link').select(); toast('已开启分享，请长按复制链接'); }
     } catch (e) { if (mounted()) toast(e.message); } finally { shareBusy = false; }
   };
@@ -1742,7 +1742,7 @@ async function renderMobileDoc(relPath, epoch) {
     if (!shareUrl) return mShareAction();
     if (shareBusy) return;
     shareBusy = true;
-    toast('正在更新静态分享…');
+    toast('正在复制分享链接…');
     try {
       const resp = await fetch(shareEndpoint, { method: 'POST' });
       const result = await resp.json();

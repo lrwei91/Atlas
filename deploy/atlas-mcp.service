@@ -1,0 +1,25 @@
+[Unit]
+Description=Atlas read-only knowledge MCP
+After=network.target
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas-mcp/current
+EnvironmentFile=/etc/atlas-mcp/atlas-mcp.env
+ExecStartPre=/usr/bin/test -d /srv/atlas/vault/notes
+ExecStartPre=/usr/bin/test -d /srv/atlas/vault/resources
+ExecStartPre=/usr/bin/test -r /etc/atlas-mcp/clients.json
+ExecStart=/usr/local/bin/node /opt/atlas-mcp/current/mcp-server.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/srv/atlas/vault
+
+[Install]
+WantedBy=multi-user.target

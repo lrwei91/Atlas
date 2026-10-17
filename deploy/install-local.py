@@ -10,7 +10,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument('--public-url', default='')
 args = parser.parse_args()
-if args.public_url and args.public_url not in ('https://note.lrwei91.com', 'https://note.lrwei91.online'):
+if args.public_url and args.public_url not in ('https://note.lrwei91.com', 'https://note.lrwei91.online', 'https://note.lrwei91.cn'):
     parser.error('public URL must be an authorized Atlas hostname')
 root = pathlib.Path(__file__).resolve().parents[1]
 state = root / '.local'
