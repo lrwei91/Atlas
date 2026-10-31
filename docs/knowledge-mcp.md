@@ -4,11 +4,11 @@ Atlas 网页与独立 MCP 进程共用 `knowledge.js` 的检索实现、`documen
 
 ## 状态与边界
 
-- 已部署于独立的 `/opt/atlas-mcp/current`，公网端点为 `https://mcp.lrwei91.online/note`。部署快照见 [2026-10-17 验收记录](mcp-deployment-2026-10-17.md)。
+- 当前服务为 `atlas-knowledge-mcp.service`，源码位于 `/opt/personal-mcp/note`，正式端点为 `https://mcp.lrwei91.cn/note`。历史部署快照见 [2026-10-17 验收记录](mcp-deployment-2026-10-17.md)。
 - 已实现 Streamable HTTP：`POST /note`，无状态 JSON 响应，使用官方 TypeScript SDK。认证后的 GET/DELETE 返回 405，不提供旧版独立 SSE 端点。
 - 四个只读工具，无写入、删除、命令执行、外部 URL 抓取或跨库路径入口。
 - 使用独立客户端 Bearer Token；服务只保存 Token 的 SHA-256。仅支持能主动设置 Authorization 请求头的客户端，尚未实现 OAuth、自动授权发现和网页登录流程。
-- Muse 的接口形态参考已有 `v9-data-api` 项目的 `API.md`；不能据此声称 Muse 已连接此服务。
+- Muse 的接口形态参考原 `v9-data-api` 项目（已并入 personal-mcp 数据 MCP 服务）的 `API.md`；不能据此声称 Muse 已连接此服务。
 - 本地全量回归、服务器 MCP 回归、独立隧道及公网真实读取已通过；当前 Codex 聊天已直接使用 MCP 搜索和读取真实笔记。Muse 界面、其他设备、长期负载和重启整机尚未验证。
 - 经用户确认，Muse/Codex 的权限都为整个 `notes/`。已在本机 Codex 配置中添加 `atlas_knowledge`，通过凭据 helper 取认证头；没有在 TOML 中保存 Token，也没有复用 V9 服务的凭据或域名入口。
 - 端点已按用户要求改为 `/note`，旧 `/mcp` 返回 404；Token 不变。Codex 配置已更新，地址变更前建立的聊天连接需要重新连接 MCP。
@@ -39,7 +39,7 @@ Atlas 网页与独立 MCP 进程共用 `knowledge.js` 的检索实现、`documen
 - 每客户端每分钟最多 120 个 POST 请求，同时最多 8 个请求；初始化也计入。限额在进程重启后重置，未认证请求的限速应由私有网络或部署入口补充。
 - 请求体最多 64 KiB；仅 `/healthz` 无需认证，返回存活状态，不披露文件或同步信息。
 - 服务只绑定 `127.0.0.1`。Host 必须在允许列表；携带 Origin 的请求必须匹配显式允许列表。不接受 URL 查询参数传 Token，也不设置通配 CORS。
-- Cloudflare Browser Integrity Check 会拒绝默认 Python-urllib User-Agent，返回 403/1010；Node、Codex、HTTPX、Requests 的请求已通过检查。用 urllib 时应设置正常客户端标识，例如 `User-Agent: AtlasMCP/1.0`。尚未获得修改该项 WAF 配置的管理权限，未改变全站安全设置。
+- 正式 `.cn` 入口直接经火山云 nginx；旧 `.online` 兼容入口仍可能受到既有 Cloudflare WAF 检查。优先使用 `.cn` 和 Authorization 请求头。
 
 ## 本地检查
 
@@ -57,7 +57,7 @@ ATLAS_MCP_CLIENTS_FILE=/path/to/private/mcp-clients.json \
 npm run start:mcp
 ```
 
-客户端文件格式见 `deploy/mcp-clients.example.json`。示例中的 hash 和目录均为占位值，不能直接启动；正式配置放在仓库外，由服务用户读取。生产目录为 `/etc/atlas-mcp`（root:atlas，0750），hash 配置与连接器凭据为 root:atlas、0640；本机原始 Token 文件为用户独占、0600。`roots` 相对 `notes/`，例如 `["技术", "项目/Atlas"]`。`["*"]` 明确授权整个 notes/；空目录列表、相对穿越路径、无效 hash 或重复客户端均拒绝启动。
+客户端文件格式见 `deploy/mcp-clients.example.json`。示例中的 hash 和目录均为占位值，不能直接启动；正式配置放在仓库外，由服务用户读取。当前客户端 hash 配置为 `/etc/personal-mcp/note-clients.json`（root:atlas，0640），环境配置为 `/etc/personal-mcp/note.env`（root，0600）；本机原始 Token 文件为用户独占、0600。`roots` 相对 `notes/`，例如 `["技术", "项目/Atlas"]`。`["*"]` 明确授权整个 notes/；空目录列表、相对穿越路径、无效 hash 或重复客户端均拒绝启动。
 
 正式凭据应为每个 Agent 单独生成的高熵随机值，至少 32 字符；用户确认开放范围后再创建并通过秘密管理渠道交付，不写入 Markdown、Git、URL 或日志。SHA-256 不能弥补弱 Token。删除客户端记录或更换 hash 后重启服务，即可撤销旧 Token。
 
@@ -74,21 +74,21 @@ ATLAS_MCP_URL=https://approved-host.example.com/note node mcp-check.js
 
 1. 确认现有 Atlas 服务器上的路径、运行时、同步状态和批准开放的目录；核对实际部署账号和运行环境。
 2. 为客户端配置独立凭据，并保存受保护的客户端文件；不复用网页管理员会话。
-3. 按服务器实际路径调整 `deploy/atlas-mcp.service` 和 `deploy/atlas-mcp.env.example`，独立运行 MCP 服务。当前使用 `/opt/atlas-mcp/releases/<源码清单哈希>` 与 `current` 链接，依赖由 lockfile 安装。systemd 将文件系统设为只读，不能给该服务添加知识库写权限。
-4. 当前远程入口采用独立 Cloudflare Tunnel，由 `atlas-mcp-tunnel.service` 运行，域名为 `mcp.lrwei91.online`；不依赖 Mac 常开，不改 Atlas 网页域名或现有隧道。`ATLAS_MCP_EDGE_PRIMARY/SECONDARY` 来自已验证的服务器连接配置。`deploy/Caddyfile.mcp.example` 是其他部署方式的可选模板，当前未安装 Caddy。
+3. 当前服务使用服务器 `/etc/systemd/system/atlas-knowledge-mcp.service`；本仓库 deploy 文件为可选模板。Codex/Muse 的原只读凭据保持只读；已有写客户端沿用原权限，沙箱按用户批准使用单一 vault 挂载，resources 仍只读。
+4. 正式 `.cn` 入口由火山云 nginx 提供 HTTPS，代理到 loopback 14322；旧 `mcp.lrwei91.online/note` 通过现有 Cloudflare 隧道和云端兼容代理保留，供旧客户端使用，两者 Token 不变。`deploy/Caddyfile.mcp.example` 是可选模板，当前未安装 Caddy。
 5. 将正式主机名加入 `ATLAS_MCP_ALLOWED_HOSTS`。不要通过允许任意 Host/Origin 来绕过验证，也不要开放 4320 到公网。
 6. 客户端配置 Streamable HTTP，URL 为正式 `/note`，认证请求头为 `Authorization: Bearer <该客户端自己的 Token>`。Muse 可参考既有 V9 接入界面，但需要实际验证读取、图片及响应大小兼容性。
 7. Codex 支持以环境变量提供 Bearer Token，其他设备可以采用以下配置示意；当前 Mac 使用 `http_headers_helper`，已连接，不需要把 Token 写入此配置：
 
 ```toml
 [mcp_servers.atlas_knowledge]
-url = "https://mcp.lrwei91.online/note"
+url = "https://mcp.lrwei91.cn/note"
 bearer_token_env_var = "ATLAS_MCP_TOKEN"
 ```
 
 原生客户端需分别验收连接、工具发现、中文搜索、章节分页、目录拒绝与附件显示。官方 SDK 本地通过不等于 Muse/Codex 已接入，配置被解析也不等于远程连接成功。
 
-Muse 连接信息：Streamable HTTP；地址为 `https://mcp.lrwei91.online/note`；Bearer Token 从 Bitwarden 的 `ATLAS_MCP_MUSE_TOKEN` 复制。Codex 独立使用 `ATLAS_MCP_CODEX_TOKEN`。为其他 Agent 接入时应另建凭据，不共享这两组 Token。当前尚未登录或操作 Muse 的连接配置界面。
+Muse 连接信息：Streamable HTTP；地址为 `https://mcp.lrwei91.cn/note`；Bearer Token 从 Bitwarden 的 `ATLAS_MCP_MUSE_TOKEN` 复制。Codex 独立使用 `ATLAS_MCP_CODEX_TOKEN`。为其他 Agent 接入时应另建凭据，不共享这两组 Token。当前尚未登录或操作 Muse 的连接配置界面。
 
 ## 来源
 

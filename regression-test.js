@@ -19,7 +19,7 @@ async function serverTests() {
   fs.mkdirSync(path.join(vault, 'resources'));
   fs.writeFileSync(path.join(vault, 'notes', 'test.md'), '# Original\n旧内容');
   const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
-    env: { ...process.env, PORT: '0', ATLAS_VAULT: vault, ATLAS_STATE_DIR: state, ATLAS_PUBLIC_URL: 'https://note.lrwei91.online' },
+    env: { ...process.env, PORT: '0', ATLAS_VAULT: vault, ATLAS_STATE_DIR: state, ATLAS_PUBLIC_URL: 'https://note.lrwei91.cn' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exited = new Promise(resolve => child.once('exit', resolve));
@@ -30,7 +30,7 @@ async function serverTests() {
       child.once('exit', () => { clearTimeout(timer); reject(Error('Startup failed')); });
     });
     let cookie = '';
-    const headers = () => ({ Origin: 'https://note.lrwei91.online', Cookie: cookie, 'Content-Type': 'application/json' });
+    const headers = () => ({ Origin: 'https://note.lrwei91.cn', Cookie: cookie, 'Content-Type': 'application/json' });
     function chunked(method, route, input, splitChar) {
       const body = Buffer.from(JSON.stringify(input));
       const split = body.indexOf(Buffer.from(splitChar)) + 1;
@@ -171,7 +171,7 @@ async function serverTests() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     assert.equal(await new Promise(resolve => launch.once('exit', resolve)), 0);
-    assert.equal(fs.readFileSync(opened, 'utf8'), 'https://note.lrwei91.online/');
+    assert.equal(fs.readFileSync(opened, 'utf8'), 'https://note.lrwei91.cn/');
     console.log('PASS: split UTF-8 setup/login/save, byte limit, missing/stale versions, external edits, two editors, launcher URL');
     for (const dir of ['10-工作', '20-学习', 'C3', 'C4', 'C5', 'C6', 'C7']) fs.mkdirSync(path.join(vault, 'notes', dir));
     fs.writeFileSync(path.join(vault, 'notes', '10-工作/编辑靶子.md'), '# 编辑靶子\n原始编辑样本');

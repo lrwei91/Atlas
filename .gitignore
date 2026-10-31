@@ -21,3 +21,7 @@ DerivedData/
 .codex/
 .cursor/
 .pytest_cache/
+
+# iOS App 仅在本地维护
+/ios/
+/docs/ios-app-playbook.md

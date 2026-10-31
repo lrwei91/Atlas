@@ -9,7 +9,7 @@ const fs = require('fs');
   const cookie = process.env.ATLAS_TEST_COOKIE || '';
   const vault = process.env.ATLAS_TEST_VAULT;
   if (!base || !vault) { console.error('需要 ATLAS_TEST_URL / ATLAS_TEST_COOKIE / ATLAS_TEST_VAULT'); process.exit(1); }
-  const ORIGIN = 'https://note.lrwei91.online';
+  const ORIGIN = 'https://note.lrwei91.cn';
   const results = [];
   const check = (name, ok, extra = '') => { results.push([name, ok]); console.log(`${ok ? '✅' : '❌'} ${name}${extra ? ' · ' + extra : ''}`); };
   const api = (method, qs, body, origin = ORIGIN) => fetch(base + qs, {

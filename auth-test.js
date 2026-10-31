@@ -20,7 +20,7 @@ const { spawn } = require('node:child_process');
   fs.writeFileSync(path.join(vault, 'secret.txt'), 'private');
   fs.writeFileSync(path.join(vault, 'resources', 'page.html'), '<script>alert(1)</script>');
   const state = path.join(dir, 'state');
-  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], { env: { ...process.env, PORT: '0', ATLAS_PUBLIC_URL: 'https://note.lrwei91.online', ATLAS_VAULT: vault, ATLAS_STATE_DIR: state }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], { env: { ...process.env, PORT: '0', ATLAS_PUBLIC_URL: 'https://note.lrwei91.cn', ATLAS_VAULT: vault, ATLAS_STATE_DIR: state }, stdio: ['ignore', 'pipe', 'pipe'] });
   let base;
   try {
     base = await new Promise((resolve, reject) => {
@@ -28,7 +28,7 @@ const { spawn } = require('node:child_process');
       child.stdout.on('data', data => { const match = String(data).match(/http:\/\/localhost:(\d+)/); if (match) { clearTimeout(timer); resolve('http://localhost:' + match[1]); } });
       child.once('exit', code => { clearTimeout(timer); reject(new Error('Server exited ' + code)); });
     });
-    const post = (route, body, cookie, origin = 'https://note.lrwei91.online') => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
+    const post = (route, body, cookie, origin = 'https://note.lrwei91.cn') => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
     for (const route of ['/api/tree', '/api/cards', '/api/search?q=test', '/api/doc?path=test.md', '/files/notes/test.md']) assert.equal((await fetch(base + route)).status, 401);
     assert.equal((await fetch(base + '/', { redirect: 'manual' })).status, 302);
     assert.equal((await fetch(base + '/auth/status')).status, 200);
@@ -136,7 +136,7 @@ const { spawn } = require('node:child_process');
     assert.equal(fs.statSync(path.join(state, 'shares.json')).mode & 0o777, 0o600);
     fs.writeFileSync(path.join(vault, 'notes', 'test.md'), '---\ntitle: hidden\n---\n# Updated\nFresh share update\n![[测试 空格.png|300]]');
     assert.match((await (await fetch(base + sharePath + '/doc')).json()).content, /Fresh share update/);
-    assert.equal((await fetch(base + shareEndpoint, {method:'DELETE', headers:{Cookie:cookie, Origin:'https://note.lrwei91.online'}})).status, 200);
+    assert.equal((await fetch(base + shareEndpoint, {method:'DELETE', headers:{Cookie:cookie, Origin:'https://note.lrwei91.cn'}})).status, 200);
     for (const suffix of ['', '/doc', '/file?path=' + encodeURIComponent('resources/' + imageName)]) assert.equal((await fetch(base + sharePath + suffix, { headers: { 'If-None-Match': fullVideo.headers.get('etag') } })).status, 404);
     assert.equal((await (await get('/api/cards')).json()).cards.find(c => c.relPath === 'test.md').isShared, false);
     seedLegacyShare();
@@ -152,7 +152,7 @@ const { spawn } = require('node:child_process');
     const external = await (await get('/api/share?path=recent.md')).json();
     assert.equal(new URL(external.url).pathname, '/s/' + externalToken);
     assert.equal((await fetch(base + new URL(external.url).pathname + '/doc')).status, 200);
-    await fetch(base + '/api/share?path=recent.md', { method: 'DELETE', headers: { Cookie: cookie, Origin: 'https://note.lrwei91.online' } });
+    await fetch(base + '/api/share?path=recent.md', { method: 'DELETE', headers: { Cookie: cookie, Origin: 'https://note.lrwei91.cn' } });
     assert.equal((await fetch(base + new URL(external.url).pathname + '/doc')).status, 404);
     const page = await get('/');
     assert.equal(page.headers.get('content-encoding'), 'gzip');
@@ -181,7 +181,7 @@ const { spawn } = require('node:child_process');
 
     /* ---- 游客模式：免凭据进入，只读，且与真实主库完全隔离 ---- */
     assert.equal((await post('/auth/guest', {}, '', 'https://attacker.example')).status, 403);
-    assert.equal((await fetch(base + '/auth/guest', { method: 'POST', headers: { 'Content-Type': 'text/plain', Origin: 'https://note.lrwei91.online' }, body: '{}' })).status, 403);
+    assert.equal((await fetch(base + '/auth/guest', { method: 'POST', headers: { 'Content-Type': 'text/plain', Origin: 'https://note.lrwei91.cn' }, body: '{}' })).status, 403);
     const guest = await post('/auth/guest', {});
     assert.equal(guest.status, 200);
     const guestBody = await guest.json();
@@ -191,7 +191,7 @@ const { spawn } = require('node:child_process');
     assert.match(guest.headers.get('set-cookie'), /HttpOnly; SameSite=Strict.*; Secure/);
     assert.match(guest.headers.get('set-cookie'), /Max-Age=7200/);
     const gGet = route => fetch(base + route, { headers: { Cookie: guestCookie } });
-    const gPost = (route, body = {}) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.online', Cookie: guestCookie }, body: JSON.stringify(body) });
+    const gPost = (route, body = {}) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.cn', Cookie: guestCookie }, body: JSON.stringify(body) });
     const guestStatus = await (await fetch(base + '/auth/status', { headers: { Cookie: guestCookie } })).json();
     assert.equal(guestStatus.authenticated, true);
     assert.equal(guestStatus.guest, true);
@@ -234,8 +234,8 @@ const { spawn } = require('node:child_process');
     const demoWriteTarget = '/api/doc?path=' + encodeURIComponent(sample.relPath);
     for (const route of ['/api/doc?path=test.md', demoWriteTarget, '/api/share?path=test.md']) {
       assert.equal((await gPost(route)).status, 403, route);
-      assert.equal((await fetch(base + route, { method: 'DELETE', headers: { Cookie: guestCookie, Origin: 'https://note.lrwei91.online' } })).status, 403, route);
-      assert.equal((await fetch(base + route, { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.online', Cookie: guestCookie }, body: '{"content":"x","version":"' + '0'.repeat(64) + '"}' })).status, 403, route);
+      assert.equal((await fetch(base + route, { method: 'DELETE', headers: { Cookie: guestCookie, Origin: 'https://note.lrwei91.cn' } })).status, 403, route);
+      assert.equal((await fetch(base + route, { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: 'https://note.lrwei91.cn', Cookie: guestCookie }, body: '{"content":"x","version":"' + '0'.repeat(64) + '"}' })).status, 403, route);
     }
     // 写操作被拒后主库文件未改动
     assert.equal(fs.readFileSync(path.join(vault, 'notes', 'test.md'), 'utf8').includes('Fresh share update'), true);

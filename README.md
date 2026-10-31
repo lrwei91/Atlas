@@ -64,7 +64,7 @@ npm start
 | `atlas-sync.service` | 独立双向同步服务模板 |
 | `Caddyfile.server` | 服务器本地 Atlas 的 HTTPS 代理模板 |
 
-服务器部署与双向同步见 [Linux 迁移说明](docs/linux-migration.md)。目标入口为 `https://note.lrwei91.cn`；中国大陆服务器的公网网站须先满足备案与接入条件。备案完成前可通过 SSH 转发私有访问，不切换原公网入口。
+服务器部署与双向同步见 [Linux 迁移说明](docs/linux-migration.md)。当前公网入口为 `https://note.lrwei91.cn`，运行于已完成备案接入的火山云服务器。原 `.online` 入口仅保留历史兼容用途，Web 和 iOS 使用 `.cn` 正式入口。
 
 以 Cloudflare Tunnel 为例，不需要云服务器或本机入站端口：
 
@@ -97,7 +97,7 @@ MCP 与网页服务独立运行，共用文档读取与搜索实现。各 Agent 
 | `POST` | `/api/doc` | 新建文档，仅 `.md`，同名自动加时间戳 |
 | `PUT` | `/api/doc` | 保存文档，需同时提交 `content` 与 `version` |
 | `DELETE` | `/api/doc` | 移入 `.trash/` |
-| `GET` | `/api/cover` | 文档内嵌封面，带 ETag / 304 校验 |
+| `GET` | `/api/cover` | 文档内嵌封面，带 ETag / 304 校验；可选 `w=<80-1600>` 返回对应宽度 JPEG 缩略图 |
 | `POST` | `/api/share` | 创建或取消分享 |
 
 登录与会话接口：`GET /auth/status`，`POST /auth/login`、`/auth/setup`、`/auth/guest`、`/auth/logout`，统一校验请求来源。

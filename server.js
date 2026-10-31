@@ -16,6 +16,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const auth = require('./auth');
 const shares = require('./shares');
 let shareQueue = Promise.resolve();
@@ -162,6 +163,107 @@ function cardDetails(entry, rel, resolveImage) {
     cover: cover?.startsWith('data:') ? '/api/cover?path=' + encodeURIComponent(rel) : cover,
     ...dimensions,
   };
+}
+
+/* ---------- 封面缩略图 ---------- */
+
+// sharp 是可选依赖：缺失或解码失败时回退原图，不影响服务启动。
+let sharpLib;
+function loadSharp() {
+  if (sharpLib === undefined) {
+    try { sharpLib = require('sharp'); } catch { sharpLib = null; }
+  }
+  return sharpLib;
+}
+
+const thumbCache = new Map();
+let thumbBytes = 0;
+const THUMB_MAX_BYTES = 64 * 1024 * 1024;
+/// 缩略图落盘目录：内存条目会被 LRU 淘汰，服务重启更是一扫而空，
+/// 落盘之后第一次请求也能直接命中文件，省掉 base64 解码与 sharp 缩放。
+const THUMB_DIR = path.join(__dirname, '.local', 'thumbs');
+
+function thumbDiskPath(key) {
+  const digest = crypto.createHash('sha256').update(key).digest('hex');
+  return path.join(THUMB_DIR, digest.slice(0, 32) + '.jpg');
+}
+
+function cacheThumb(key, body) {
+  thumbCache.set(key, { body });
+  thumbBytes += body.length;
+  while (thumbBytes > THUMB_MAX_BYTES && thumbCache.size > 1) {
+    const oldest = thumbCache.keys().next().value;
+    thumbBytes -= thumbCache.get(oldest).body.length;
+    thumbCache.delete(oldest);
+  }
+}
+
+async function coverThumb(file, st, base64, width) {
+  const sharp = loadSharp();
+  if (!sharp) return null;
+  const key = `${file}@${width}:${st.mtimeMs}`;
+  const hit = thumbCache.get(key);
+  if (hit) { thumbCache.delete(key); thumbCache.set(key, hit); return hit.body; }
+
+  // 落盘缓存优先：服务刚重启、内存还没预热时，这一步能直接命中。
+  const disk = thumbDiskPath(key);
+  if (statOrNull(disk)?.isFile()) {
+    try {
+      const body = fs.readFileSync(disk);
+      cacheThumb(key, body);
+      return body;
+    } catch { /* 读盘失败就退回重新生成 */ }
+  }
+
+  const body = await sharp(Buffer.from(base64, 'base64'))
+    .rotate()
+    .resize({ width, withoutEnlargement: true })
+    // 封面多为截图，透明区域统一压到纸面色，避免缩略后露黑底。
+    .flatten({ background: '#FDFDF9' })
+    .jpeg({ quality: 78 })
+    .toBuffer();
+  // 写盘失败不影响本次响应，只是下一次还要重新生成。
+  try {
+    fs.mkdirSync(THUMB_DIR, { recursive: true });
+    fs.writeFileSync(disk, body);
+  } catch {}
+  cacheThumb(key, body);
+  return body;
+}
+
+/// 磁盘上的图片文件按宽度出缩略图，供 `/files/` 路由使用。
+///
+/// 卡片封面多数是相对路径引用的原图（`![[resources/attachments/…]]`），
+/// 一张几百 KB 到 1MB，走隧道时和缩略图差一个数量级。
+async function fileThumb(file, st, width) {
+  const sharp = loadSharp();
+  if (!sharp) return null;
+  const key = 'file:' + file + '@' + width + ':' + st.mtimeMs;
+  const hit = thumbCache.get(key);
+  if (hit) { thumbCache.delete(key); thumbCache.set(key, hit); return hit.body; }
+
+  const disk = thumbDiskPath(key);
+  if (statOrNull(disk)?.isFile()) {
+    try {
+      const body = fs.readFileSync(disk);
+      cacheThumb(key, body);
+      return body;
+    } catch { /* 读盘失败就退回重新生成 */ }
+  }
+
+  // sharp 直接吃文件路径，省掉一次 readFile 与 Buffer 拷贝。
+  const body = await sharp(file)
+    .rotate()
+    .resize({ width, withoutEnlargement: true })
+    .flatten({ background: '#FDFDF9' })
+    .jpeg({ quality: 78 })
+    .toBuffer();
+  try {
+    fs.mkdirSync(THUMB_DIR, { recursive: true });
+    fs.writeFileSync(disk, body);
+  } catch {}
+  cacheThumb(key, body);
+  return body;
 }
 
 /* ---------- API 实现 ---------- */
@@ -356,9 +458,32 @@ const server = http.createServer(async (req, res) => {
       const source = coverFrom(entry.content, rel, documents.createImageResolver(), entry);
       const match = source?.match(/^data:(image\/(?:png|jpeg|gif|webp|avif|bmp));base64,(.+)$/);
       if (!match) { sendJSON(res, 404, { error: '封面不存在' }); return; }
-      const headers = { 'Content-Type': match[1], 'Cache-Control': 'private, no-cache', ETag: responses.etag(st) };
-      if (responses.fresh(req, headers.ETag)) { res.writeHead(304, headers); res.end(); return; }
-      const body = responses.coverBody(full, st, match[2]);
+
+      // 可选宽度：卡片只需几百像素，原图动辄数百 KB。缺省不带 w 时仍返回原图，
+      // 网页端与既有调用方行为不变。
+      const requested = Number.parseInt(u.searchParams.get('w') || '', 10);
+      const width = Number.isFinite(requested) ? Math.min(1600, Math.max(80, requested)) : 0;
+
+      const baseTag = responses.etag(st);
+      const tag = width ? baseTag.slice(0, -1) + '-w' + width + '"' : baseTag;
+      const headers = {
+        'Content-Type': width ? 'image/jpeg' : match[1],
+        // 缩略图由「文档 mtime + 宽度」唯一决定，可以放心长缓存。
+        // 文档改了 mtime 会变，ETag 与磁盘路径随之变化，不会读到旧图。
+        'Cache-Control': width ? 'private, max-age=2592000' : 'private, no-cache',
+        ETag: tag,
+      };
+      if (responses.fresh(req, tag)) { res.writeHead(304, headers); res.end(); return; }
+
+      let body = null;
+      if (width) {
+        try { body = await coverThumb(full, st, match[2], width); } catch { body = null; }
+      }
+      if (!body) {
+        // sharp 未安装或解码失败时退回原图，并恢复真实 Content-Type。
+        body = responses.coverBody(full, st, match[2]);
+        headers['Content-Type'] = match[1];
+      }
       headers['Content-Length'] = body.length;
       res.writeHead(200, headers); res.end(req.method === 'HEAD' ? undefined : body); return;
     }
@@ -518,12 +643,36 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/files/')) {
       const rel = p.slice('/files/'.length);
       const abs = /^(notes|resources)\//.test(rel) ? safeResolve(VAULT, rel) : null;
-      if (!abs || !statOrNull(abs) || !statOrNull(abs).isFile()) { res.writeHead(404); res.end('Not found'); return; }
-      if (['.html', '.js', '.css', '.xml'].includes(path.extname(abs).toLowerCase())) {
+      const st = abs && statOrNull(abs);
+      if (!st?.isFile()) { res.writeHead(404); res.end('Not found'); return; }
+      const ext = path.extname(abs).toLowerCase();
+
+      // 图片可按宽度出缩略图。原图常常几百 KB，卡片封面只需要几百像素。
+      const requested = Number.parseInt(u.searchParams.get('w') || '', 10);
+      const width = Number.isFinite(requested) ? Math.min(1600, Math.max(80, requested)) : 0;
+      if (width && ext !== '.svg' && IMAGE_EXT.test(ext)) {
+        const thumb = await fileThumb(abs, st, width).catch(() => null);
+        if (thumb) {
+          const base = responses.etag(st);
+          const headers = {
+            'Content-Type': 'image/jpeg',
+            // 缩略图由「文件 mtime + 宽度」唯一决定，可长缓存。
+            'Cache-Control': 'private, max-age=2592000',
+            ETag: base.slice(0, -1) + '-w' + width + '"',
+          };
+          if (responses.fresh(req, headers.ETag)) { res.writeHead(304, headers); res.end(); return; }
+          headers['Content-Length'] = thumb.length;
+          res.writeHead(200, headers);
+          res.end(req.method === 'HEAD' ? undefined : thumb);
+          return;
+        }
+      }
+
+      if (['.html', '.js', '.css', '.xml'].includes(ext)) {
         res.setHeader('Content-Disposition', 'attachment');
         res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
       }
-      if (path.extname(abs).toLowerCase() === '.svg') res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+      if (ext === '.svg') res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
       sendFile(req, res, abs);
       return;
     }

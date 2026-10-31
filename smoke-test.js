@@ -22,7 +22,7 @@ const assert = require('node:assert/strict');
           return Promise.resolve({ ok: true, json: async () => ({ url: simulatedShare }) });
         }
         const abs = url.startsWith('http') ? url : base + url;
-        return global.fetch(abs, { ...options, headers: { Cookie: process.env.ATLAS_TEST_COOKIE || '', Origin: 'https://note.lrwei91.online', ...options.headers } });
+        return global.fetch(abs, { ...options, headers: { Cookie: process.env.ATLAS_TEST_COOKIE || '', Origin: 'https://note.lrwei91.cn', ...options.headers } });
       };
       window.addEventListener('error', (e) => errors.push('window error: ' + e.message));
       window.addEventListener('unhandledrejection', (e) => errors.push('unhandledrejection: ' + (e.reason && e.reason.stack || e.reason)));
